@@ -1,0 +1,44 @@
+name: Build & Release MemeOverlay.exe
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install overlay dependencies
+        working-directory: overlay-app
+        run: npm install
+
+      - name: Build portable .exe
+        working-directory: overlay-app
+        run: npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "MemeOverlay ${{ github.ref_name }}"
+          body: |
+            ## Téléchargement
+
+            Télécharge `MemeOverlay.exe` ci-dessous et lance-le directement — aucune installation requise.
+
+            ### Première utilisation
+            Entre ton **Discord User ID** au démarrage pour recevoir les memes.
+
+            > Le serveur Discord doit tourner séparément (`npm run dev`).
+          files: overlay-app/dist/MemeOverlay.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>MemeOverlay</title>
+  <!-- Socket.io depuis le serveur local -->
+  <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ── Le body est 100% transparent ── */
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent !important;
+      overflow: hidden;
+    }
+
+    /* ── Overlay centré, invisible par défaut ── */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    #overlay.visible {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* ── Badge expéditeur ── */
+    #sender-badge {
+      background: rgba(15, 15, 25, 0.85);
+      border: 1px solid rgba(124, 111, 255, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 999px;
+      padding: 0.35rem 1rem;
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.8rem;
+      color: #aaa;
+      margin-bottom: 1rem;
+      animation: slideDown 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    #sender-badge strong { color: #a78bfa; }
+
+    /* ── Cadre du media ── */
+    #media-wrap {
+      position: relative;
+      max-width: 52vw;
+      max-height: 55vh;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.08),
+        0 8px 40px rgba(0,0,0,0.6),
+        0 0 80px rgba(124,111,255,0.2);
+      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+
+    #media-wrap img,
+    #media-wrap video {
+      display: block;
+      max-width: 52vw;
+      max-height: 55vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+    }
+
+    /* ── Caption ── */
+    #caption {
+      margin-top: 1.1rem;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.8rem;
+      letter-spacing: 0.06em;
+      color: #fff;
+      text-align: center;
+      max-width: 55vw;
+      line-height: 1.05;
+      /* Contour noir pour lisibilité sur n'importe quel fond */
+      text-shadow:
+        3px  3px 0 #000,
+       -3px -3px 0 #000,
+        3px -3px 0 #000,
+       -3px  3px 0 #000,
+        0    3px 0 #000,
+        0   -3px 0 #000,
+        3px  0   0 #000,
+       -3px  0   0 #000;
+      animation: fadeUp 0.35s 0.15s ease both;
+    }
+
+    /* ── Bouton fermer ── */
+    #close-btn {
+      margin-top: 1.2rem;
+      background: rgba(15, 15, 25, 0.8);
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: rgba(255,255,255,0.6);
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 0.5rem 1.5rem;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.05em;
+      animation: fadeUp 0.35s 0.25s ease both;
+    }
+    #close-btn:hover {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border-color: rgba(255,255,255,0.25);
+    }
+
+    /* ── Animations ── */
+    @keyframes popIn {
+      from { transform: scale(0.55) translateY(30px); opacity: 0; }
+      to   { transform: scale(1)    translateY(0);    opacity: 1; }
+    }
+    @keyframes slideDown {
+      from { transform: translateY(-20px); opacity: 0; }
+      to   { transform: translateY(0);     opacity: 1; }
+    }
+    @keyframes fadeUp {
+      from { transform: translateY(16px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(0.9); }
+    }
+    .hiding {
+      animation: fadeOut 0.3s ease forwards !important;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="overlay">
+    <div id="sender-badge">💀 de <strong id="sender-name"></strong></div>
+    <div id="media-wrap"></div>
+    <div id="caption"></div>
+    <button id="close-btn" onclick="closeMeme()">Fermer  ✕</button>
+  </div>
+
+  <script>
+    // ── Config ────────────────────────────────────────────────
+    // userId stocké dans un fichier config ou passé en variable
+    // Pour le POC, on le lit depuis un fichier local ou localStorage Electron
+    const USER_ID = localStorage.getItem("discordUserId") || promptUserId();
+
+    function promptUserId() {
+      const id = prompt("Entre ton Discord User ID :");
+      if (id) localStorage.setItem("discordUserId", id);
+      return id;
+    }
+
+    // ── Socket.io ─────────────────────────────────────────────
+    const socket = io("http://localhost:3000");
+
+    socket.on("connect", () => {
+      if (USER_ID) socket.emit("identify", USER_ID);
+      console.log("Connecté, identifié comme", USER_ID);
+    });
+
+    // ── Réception du meme ─────────────────────────────────────
+    socket.on("meme", ({ mediaUrl, mediaType, text, senderName }) => {
+      showMeme(mediaUrl, mediaType, text, senderName);
+    });
+
+    function showMeme(mediaUrl, mediaType, text, senderName) {
+      const wrap = document.getElementById("media-wrap");
+      wrap.innerHTML = "";
+
+      // Media
+      if (mediaType === "video") {
+        const v = document.createElement("video");
+        v.src = mediaUrl;
+        v.autoplay = true;
+        v.loop = true;
+        v.muted = false;
+        wrap.appendChild(v);
+      } else {
+        const img = document.createElement("img");
+        img.src = mediaUrl;
+        wrap.appendChild(img);
+      }
+
+      // Texte
+      const cap = document.getElementById("caption");
+      cap.textContent = text || "";
+      cap.style.display = text ? "block" : "none";
+
+      // Expéditeur
+      document.getElementById("sender-name").textContent = senderName;
+
+      // Forcer re-animation
+      const overlay = document.getElementById("overlay");
+      overlay.classList.remove("hiding");
+      overlay.classList.add("visible");
+
+      // Dire à Electron : activer les clics
+      window.electron?.memeShow();
+
+      // Auto-fermeture après 12s
+      clearTimeout(window._autoClose);
+      window._autoClose = setTimeout(closeMeme, 12000);
+    }
+
+    function closeMeme() {
+      const overlay = document.getElementById("overlay");
+      overlay.classList.add("hiding");
+
+      setTimeout(() => {
+        overlay.classList.remove("visible", "hiding");
+        document.getElementById("media-wrap").innerHTML = "";
+        // Dire à Electron : retour click-through
+        window.electron?.memeHide();
+      }, 300);
+
+      clearTimeout(window._autoClose);
+    }
+
+    // Fermer avec Échap
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeMeme();
+    });
+  </script>
+</body>
+</html>

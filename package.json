@@ -1,0 +1,21 @@
+{
+  "name": "memescreen-server",
+  "version": "1.0.0",
+  "description": "Serveur + Bot Discord pour MemeScreen",
+  "scripts": {
+    "start": "node server.js",
+    "bot": "node bot.js",
+    "dev": "concurrently \"node server.js\" \"node bot.js\""
+  },
+  "dependencies": {
+    "youtube-dl-exec": "^3.0.12",
+    "cors": "^2.8.5",
+    "discord.js": "^14.16.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

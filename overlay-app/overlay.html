@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>MemeOverlay</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: transparent !important;
+      overflow: hidden;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      padding: 48px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    #overlay.visible { opacity: 1; }
+
+    /* ── 9 positions ── */
+    #overlay.pos-tl { align-items: flex-start;  justify-content: flex-start; }
+    #overlay.pos-t  { align-items: center;       justify-content: flex-start; }
+    #overlay.pos-tr { align-items: flex-end;     justify-content: flex-start; }
+    #overlay.pos-l  { align-items: flex-start;  justify-content: center;     }
+    #overlay.pos-c  { align-items: center;       justify-content: center;     }
+    #overlay.pos-r  { align-items: flex-end;     justify-content: center;     }
+    #overlay.pos-bl { align-items: flex-start;  justify-content: flex-end;   }
+    #overlay.pos-b  { align-items: center;       justify-content: flex-end;   }
+    #overlay.pos-br { align-items: flex-end;     justify-content: flex-end;   }
+
+    #media-wrap {
+      max-width: 40vw;
+      max-height: 45vh;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+      /* Force un calque de composition séparé — fix rendu vidéo dans fenêtre transparente */
+      transform: translateZ(0);
+      -webkit-transform: translateZ(0);
+      will-change: transform;
+      isolation: isolate;
+    }
+
+    #media-wrap img {
+      display: block;
+      max-width: 40vw;
+      max-height: 45vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+    }
+
+    #media-wrap video {
+      display: block;
+      width: 560px;
+      height: 315px;
+      max-width: 40vw;
+      max-height: 45vh;
+      object-fit: contain;
+      background: #000;
+    }
+
+
+    #caption {
+      margin-top: 1rem;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.4rem;
+      letter-spacing: 0.06em;
+      color: #fff;
+      text-align: center;
+      max-width: 42vw;
+      line-height: 1.05;
+      text-shadow:
+        3px  3px 0 #000, -3px -3px 0 #000,
+        3px -3px 0 #000, -3px  3px 0 #000,
+        0    3px 0 #000,  0   -3px 0 #000,
+        3px  0   0 #000, -3px  0   0 #000;
+      animation: fadeUp 0.35s 0.15s ease both;
+    }
+
+    @keyframes popIn {
+      from { transform: scale(0.55) translateY(20px); opacity: 0; }
+      to   { transform: scale(1)    translateY(0);    opacity: 1; }
+    }
+    @keyframes fadeUp {
+      from { transform: translateY(12px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(0.9); }
+    }
+    .hiding { animation: fadeOut 0.3s ease forwards !important; }
+  </style>
+</head>
+<body>
+
+  <div id="overlay" class="pos-c">
+    <div id="media-wrap"></div>
+    <div id="caption"></div>
+  </div>
+
+  <script>
+    const POSITIONS = ["tl","t","tr","l","c","r","bl","b","br"];
+
+    let paused = false;
+    window.electron.onPause((val) => { paused = val; });
+
+    async function init() {
+      const userId = await window.electron.getUserId();
+      const socket = io();
+
+      socket.on("connect", () => {
+        if (userId) socket.emit("identify", userId);
+      });
+
+      socket.on("meme", (payload) => {
+        if (!paused) showMeme(payload);
+      });
+    }
+
+    function playSound() {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.6);
+    }
+
+    function showMeme({ mediaUrl, mediaType, text, senderName, duration = 2, position = "c", sound = false, start = 0 }) {
+      const overlay = document.getElementById("overlay");
+
+      // Position
+      POSITIONS.forEach(p => overlay.classList.remove(`pos-${p}`));
+      overlay.classList.add(`pos-${POSITIONS.includes(position) ? position : "c"}`);
+
+      // Media
+      const wrap = document.getElementById("media-wrap");
+      wrap.innerHTML = "";
+      wrap.style.display = "";
+      if (mediaType === "youtube-stream") {
+        mediaUrl = window.location.origin + mediaUrl;
+        mediaType = "video";
+      }
+
+      if (mediaType === "youtube-audio") {
+        mediaUrl = window.location.origin + mediaUrl;
+        mediaType = "audio";
+      }
+
+      if (mediaType === "audio") {
+        const a = document.createElement("audio");
+        a.src = mediaUrl;
+        a.autoplay = true;
+        a.muted = false;
+        if (start > 0) {
+          a.addEventListener("loadedmetadata", () => { a.currentTime = start; }, { once: true });
+        }
+        a.addEventListener("error", () => console.error("Audio error:", a.error?.code, a.src));
+        wrap.appendChild(a);
+        a.play().catch(e => console.error("Audio autoplay blocked:", e));
+        // Pas de visuel pour l'audio seul
+        wrap.style.display = "none";
+      } else if (mediaType === "video") {
+        const v = document.createElement("video");
+        v.src = mediaUrl;
+        v.autoplay = true;
+        v.loop = true;
+        v.muted = false;
+        v.playsInline = true;
+        if (start > 0) {
+          v.addEventListener("loadedmetadata", () => { v.currentTime = start; }, { once: true });
+        }
+        v.addEventListener("error", () => console.error("Video error:", v.error?.code, v.error?.message, v.src));
+        wrap.appendChild(v);
+        v.play().catch(e => console.error("Autoplay blocked:", e));
+      } else if (mediaType === "image") {
+        const img = document.createElement("img");
+        img.src = mediaUrl;
+        wrap.appendChild(img);
+      }
+
+      // Caption
+      const cap = document.getElementById("caption");
+      cap.textContent = text || "";
+      cap.style.display = text ? "block" : "none";
+
+      // Expéditeur
+      // Affichage
+      overlay.classList.remove("hiding");
+      overlay.classList.add("visible");
+
+      // Son
+      if (sound) playSound();
+
+      // Auto-fermeture
+      clearTimeout(window._autoClose);
+      window._autoClose = setTimeout(hideMeme, duration * 1000);
+    }
+
+    function hideMeme() {
+      const overlay = document.getElementById("overlay");
+      overlay.classList.add("hiding");
+      setTimeout(() => {
+        overlay.classList.remove("visible", "hiding");
+        document.getElementById("media-wrap").innerHTML = "";
+      }, 300);
+      clearTimeout(window._autoClose);
+    }
+
+    init();
+  </script>
+</body>
+</html>

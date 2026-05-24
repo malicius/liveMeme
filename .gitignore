@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# Dependencies
+node_modules/
+overlay-app/node_modules/
+
+# Build output
+overlay-app/dist/
+overlay-app/build/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp player scripts
+*-player-script.js

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>MemeOverlay — Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 10px;
+      padding: 24px;
+    }
+    label { font-size: 0.75rem; color: #888; align-self: flex-start; margin-bottom: -6px; }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #0f0f1a;
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    input:focus { border-color: #a78bfa; }
+    button {
+      width: 100%;
+      margin-top: 4px;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      background: #a78bfa;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { background: #9061f9; }
+    .hint { font-size: 0.72rem; color: #666; text-align: center; }
+  </style>
+</head>
+<body>
+  <label>Discord User ID</label>
+  <input id="userId" type="text" placeholder="ex: 123456789012345678" autofocus />
+
+  <label>URL du serveur</label>
+  <input id="serverUrl" type="text" placeholder="ex: http://192.168.1.10:38283" />
+
+  <button onclick="save()">Confirmer</button>
+  <p class="hint">Discord → Paramètres → Apparence → Mode développeur → clic droit sur ton avatar → Copier l'identifiant</p>
+
+  <script>
+    // Pré-remplir avec la config existante
+    window.electron.getConfig().then((config) => {
+      if (config.discordUserId) document.getElementById("userId").value = config.discordUserId;
+      if (config.serverUrl)    document.getElementById("serverUrl").value = config.serverUrl;
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") save();
+    });
+
+    function save() {
+      const userId    = document.getElementById("userId").value.trim();
+      const serverUrl = document.getElementById("serverUrl").value.trim().replace(/\/$/, "");
+      if (!userId || !serverUrl) return;
+      window.electron.saveConfig(userId, serverUrl);
+    }
+  </script>
+</body>
+</html>
