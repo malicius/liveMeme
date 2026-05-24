@@ -65,6 +65,8 @@ const HELP_MESSAGE = `
 
 \`\`\`
 !send @user [url ou pièce jointe] [texte] [options]
+!send @everyone [url ou pièce jointe] [texte] [options]
+!who
 \`\`\`
 
 **Source du média** (l'un ou l'autre) :
@@ -88,10 +90,13 @@ bl  │  b  │  br
 \`\`\`
 
 **Exemples :**
+\`!who\` — voir qui a l'overlay ouvert
 \`!send @Jean\` + image en pièce jointe
+\`!send @everyone\` + gif — envoie à tous les connectés
 \`!send @Jean c'est toi --time 5 --pos tr\` + gif en pièce jointe
 \`!send @Jean https://i.imgur.com/xyz.gif --pos bl --time 8\`
 \`!send @Jean https://youtu.be/dQw4w9WgXcQ --start 43 --time 10 --sound\`
+\`!send @Jean https://youtu.be/dQw4w9WgXcQ --audio\` — son seulement
 `.trim();
 
 client.on("messageCreate", async (message) => {
@@ -102,10 +107,31 @@ client.on("messageCreate", async (message) => {
     return message.reply(HELP_MESSAGE);
   }
 
+  if (message.content.trim() === "!who") {
+    try {
+      const res = await fetch(`${process.env.SERVER_URL}/api/users`);
+      const ids = await res.json();
+      if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
+      const names = await Promise.all(ids.map(async (id) => {
+        try {
+          const member = await message.guild.members.fetch(id);
+          return `• ${member.displayName}`;
+        } catch {
+          return `• Inconnu (\`${id}\`)`;
+        }
+      }));
+      return message.reply(`**🟢 Connectés (${ids.length}) :**\n${names.join("\n")}`);
+    } catch {
+      return message.reply("❌ Impossible de joindre le serveur.");
+    }
+  }
+
   if (!message.content.startsWith("!send")) return;
 
-  const mention = message.mentions.users.first();
-  if (!mention) {
+  const isEveryone = message.mentions.everyone;
+  const mention = isEveryone ? null : message.mentions.users.first();
+
+  if (!mention && !isEveryone) {
     return message.reply(
       "Usage : `!send @user [texte] [url] [--time 1-10] [--pos tl/t/tr/l/c/r/bl/b/br] [--sound] [--start secondes]`\n" +
       "Pièce jointe OU lien direct (image, gif, vidéo)."
@@ -115,6 +141,7 @@ client.on("messageCreate", async (message) => {
   const raw = message.content
     .slice(6)
     .replace(/<@!?[0-9]+>/g, "")
+    .replace(/@everyone|@here/gi, "")
     .trim();
 
   const { text, duration, position, sound, start, audioOnly, urlFromText } = parseFlags(raw);
@@ -142,6 +169,27 @@ client.on("messageCreate", async (message) => {
   if (audioOnly && mediaType === "video") mediaType = "audio";
 
   const senderName = message.member?.displayName || message.author.username;
+
+  if (isEveryone) {
+    try {
+      const usersRes = await fetch(`${process.env.SERVER_URL}/api/users`);
+      const ids = await usersRes.json();
+      if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
+      await Promise.all(ids.map(id =>
+        fetch(`${process.env.SERVER_URL}/api/send-meme`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetUserId: id, mediaUrl, mediaType, text, senderName, duration, position, sound, start, audioOnly }),
+        })
+      ));
+      await message.react("✅");
+      await message.reply(`📡 Envoyé à **${ids.length}** utilisateur(s) connecté(s).`);
+    } catch (err) {
+      console.error(err);
+      await message.reply("❌ Impossible de joindre le serveur.");
+    }
+    return;
+  }
 
   try {
     const res = await fetch(`${process.env.SERVER_URL}/api/send-meme`, {

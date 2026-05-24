@@ -72,7 +72,8 @@
       max-width: 40vw;
       max-height: 45vh;
       object-fit: contain;
-      background: #000;
+      background: transparent;
+      transition: opacity 0.2s ease;
     }
 
 
@@ -190,9 +191,11 @@
         v.loop = true;
         v.muted = false;
         v.playsInline = true;
+        v.style.opacity = "0";
         if (start > 0) {
           v.addEventListener("loadedmetadata", () => { v.currentTime = start; }, { once: true });
         }
+        v.addEventListener("canplay", () => { v.style.opacity = "1"; }, { once: true });
         v.addEventListener("error", () => console.error("Video error:", v.error?.code, v.error?.message, v.src));
         wrap.appendChild(v);
         v.play().catch(e => console.error("Autoplay blocked:", e));
