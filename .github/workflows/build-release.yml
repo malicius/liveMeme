@@ -1,4 +1,4 @@
-name: Build & Release MemeOverlay.exe
+name: Build & Release MemeOverlay
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - "v*"
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     permissions:
       contents: write
@@ -28,19 +28,54 @@ jobs:
         working-directory: overlay-app
         run: npm run build
 
-      - name: Create GitHub Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "MemeOverlay ${{ github.ref_name }}"
           body: |
             ## Téléchargement
 
-            Télécharge `MemeOverlay.exe` ci-dessous et lance-le directement — aucune installation requise.
+            | Plateforme | Fichier |
+            |---|---|
+            | Windows | `MemeOverlay.exe` |
+            | Linux | `MemeOverlay.AppImage` |
 
             ### Première utilisation
             Entre ton **Discord User ID** au démarrage pour recevoir les memes.
 
-            > Le serveur Discord doit tourner séparément (`npm run dev`).
+            **Linux** : rends le fichier exécutable avant de le lancer :
+            ```bash
+            chmod +x MemeOverlay.AppImage && ./MemeOverlay.AppImage
+            ```
           files: overlay-app/dist/MemeOverlay.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install overlay dependencies
+        working-directory: overlay-app
+        run: npm install
+
+      - name: Build AppImage
+        working-directory: overlay-app
+        run: npm run build:linux
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: overlay-app/dist/MemeOverlay.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
