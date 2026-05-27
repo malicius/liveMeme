@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>MemeOverlay — Setup</title>
+  <title>MemeOverlay — Paramètres</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -11,27 +11,72 @@
       color: #eee;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      gap: 8px;
+      padding: 18px 22px 18px;
       height: 100vh;
-      gap: 10px;
-      padding: 24px;
+      overflow-y: auto;
     }
-    label { font-size: 0.75rem; color: #888; align-self: flex-start; margin-bottom: -6px; }
-    input {
+    h2 {
+      font-size: 0.7rem;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: 6px;
+    }
+    label.field { font-size: 0.75rem; color: #888; }
+    input[type="text"], select {
       width: 100%;
-      padding: 10px 14px;
+      padding: 9px 12px;
       border-radius: 8px;
-      border: 1px solid #444;
+      border: 1px solid #333;
       background: #0f0f1a;
       color: #fff;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       outline: none;
     }
-    input:focus { border-color: #a78bfa; }
+    input[type="text"]:focus, select:focus { border-color: #a78bfa; }
+    select option { background: #1a1a2e; }
+    hr { border: none; border-top: 1px solid #222; margin: 2px 0; }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .row label { font-size: 0.85rem; color: #ccc; flex: 1; }
+    input[type="range"] { flex: 1; accent-color: #a78bfa; cursor: pointer; }
+    #vol-val { font-size: 0.8rem; color: #a78bfa; min-width: 36px; text-align: right; }
+    .toggle {
+      position: relative;
+      width: 38px;
+      height: 21px;
+      flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #333;
+      border-radius: 21px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle input:checked + .toggle-track { background: #a78bfa; }
+    .toggle-track::after {
+      content: "";
+      position: absolute;
+      width: 15px;
+      height: 15px;
+      left: 3px;
+      top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-track::after { transform: translateX(17px); }
     button {
       width: 100%;
-      margin-top: 4px;
+      margin-top: 6px;
       padding: 10px;
       border-radius: 8px;
       border: none;
@@ -42,35 +87,104 @@
       cursor: pointer;
     }
     button:hover { background: #9061f9; }
-    .hint { font-size: 0.72rem; color: #666; text-align: center; }
+    .hint { font-size: 0.68rem; color: #444; }
   </style>
 </head>
 <body>
-  <label>Discord User ID</label>
+  <h2>Connexion</h2>
+  <label class="field">Discord User ID</label>
   <input id="userId" type="text" placeholder="ex: 123456789012345678" autofocus />
+  <label class="field">URL du serveur</label>
+  <input id="serverUrl" type="text" placeholder="ex: http://livememe.romaincampanha.ch" />
 
-  <label>URL du serveur</label>
-  <input id="serverUrl" type="text" placeholder="ex: http://192.168.1.10:38283" />
+  <hr>
+  <h2>Affichage</h2>
+  <label class="field">Taille du média</label>
+  <select id="mediaSize">
+    <option value="small">Petit</option>
+    <option value="medium" selected>Moyen (défaut)</option>
+    <option value="large">Grand</option>
+    <option value="original">Taille originale</option>
+  </select>
+
+  <hr>
+  <h2>Son</h2>
+  <div class="row">
+    <label>Volume</label>
+    <input id="volume" type="range" min="0" max="100" value="100" />
+    <span id="vol-val">100%</span>
+  </div>
+
+  <hr>
+  <h2>Raccourci — fermer le meme</h2>
+  <input id="closeShortcut" type="text" placeholder="ex: Escape · F5 · CmdOrCtrl+Shift+X" />
+  <p class="hint">Appuie sur la touche voulue dans le champ ci-dessus</p>
+
+  <hr>
+  <h2>Système</h2>
+  <div class="row">
+    <label>Lancer au démarrage du PC</label>
+    <label class="toggle"><input id="autoLaunch" type="checkbox" /><span class="toggle-track"></span></label>
+  </div>
+  <div class="row" id="row-apps">
+    <label>Ajouter au menu des applications <span style="color:#555;font-size:0.75rem">(Linux)</span></label>
+    <label class="toggle"><input id="addToApps" type="checkbox" /><span class="toggle-track"></span></label>
+  </div>
 
   <button onclick="save()">Confirmer</button>
-  <p class="hint">Discord → Paramètres → Apparence → Mode développeur → clic droit sur ton avatar → Copier l'identifiant</p>
+  <p class="hint" style="text-align:center">Discord → Paramètres → Apparence → Mode développeur → clic droit sur ton avatar → Copier l'identifiant</p>
 
   <script>
+    // Masquer l'option Linux sur Windows
+    if (navigator.platform.startsWith("Win")) {
+      document.getElementById("row-apps").style.display = "none";
+    }
+
+    // Volume live
+    const volInput = document.getElementById("volume");
+    const volVal   = document.getElementById("vol-val");
+    volInput.addEventListener("input", () => { volVal.textContent = volInput.value + "%"; });
+
+    // Capture du raccourci clavier
+    const shortcutInput = document.getElementById("closeShortcut");
+    shortcutInput.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      const parts = [];
+      if (e.ctrlKey  || e.metaKey) parts.push("CmdOrCtrl");
+      if (e.altKey)   parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      const key = e.key;
+      if (!["Control","Meta","Alt","Shift"].includes(key)) {
+        parts.push(key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key);
+      }
+      if (parts.length) shortcutInput.value = parts.join("+");
+    });
+
     // Pré-remplir avec la config existante
     window.electron.getConfig().then((config) => {
-      if (config.discordUserId) document.getElementById("userId").value = config.discordUserId;
-      if (config.serverUrl)    document.getElementById("serverUrl").value = config.serverUrl;
+      if (config.discordUserId)   document.getElementById("userId").value = config.discordUserId;
+      if (config.serverUrl)       document.getElementById("serverUrl").value = config.serverUrl;
+      if (config.mediaSize)       document.getElementById("mediaSize").value = config.mediaSize;
+      if (config.volume != null)  { volInput.value = Math.round(config.volume * 100); volVal.textContent = volInput.value + "%"; }
+      if (config.closeShortcut)   shortcutInput.value = config.closeShortcut;
+      if (config.autoLaunch)      document.getElementById("autoLaunch").checked = config.autoLaunch;
+      if (config.addToApps)       document.getElementById("addToApps").checked = config.addToApps;
     });
 
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") save();
+      if (e.key === "Enter" && document.activeElement !== shortcutInput) save();
     });
 
     function save() {
-      const userId    = document.getElementById("userId").value.trim();
-      const serverUrl = document.getElementById("serverUrl").value.trim().replace(/\/$/, "");
+      const userId        = document.getElementById("userId").value.trim();
+      const serverUrl     = document.getElementById("serverUrl").value.trim().replace(/\/$/, "");
+      const mediaSize     = document.getElementById("mediaSize").value;
+      const volume        = parseInt(volInput.value) / 100;
+      const closeShortcut = shortcutInput.value.trim() || "Escape";
+      const autoLaunch    = document.getElementById("autoLaunch").checked;
+      const addToApps     = document.getElementById("addToApps").checked;
       if (!userId || !serverUrl) return;
-      window.electron.saveConfig(userId, serverUrl);
+      window.electron.saveConfig({ discordUserId: userId, serverUrl, mediaSize, volume, closeShortcut, autoLaunch, addToApps });
     }
   </script>
 </body>

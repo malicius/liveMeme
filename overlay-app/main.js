@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, session } = require("electron");
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, session, globalShortcut } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
@@ -10,14 +11,76 @@ const configPath = path.join(app.getPath("userData"), "config.json");
 let overlayWin = null;
 let tray = null;
 let isPaused = false;
+let currentShortcut = null;
+let saveConfigListenerActive = false;
+
+const DEFAULT_CONFIG = {
+  closeShortcut: "Escape",
+  mediaSize: "medium",
+  volume: 1.0,
+  autoLaunch: false,
+  addToApps: false,
+};
 
 function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(configPath, "utf8")); }
-  catch { return {}; }
+  try { return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configPath, "utf8")) }; }
+  catch { return { ...DEFAULT_CONFIG }; }
 }
 
-function saveConfig(data) {
-  fs.writeFileSync(configPath, JSON.stringify(data));
+function saveConfigToFile(data) {
+  const merged = { ...DEFAULT_CONFIG, ...data };
+  fs.writeFileSync(configPath, JSON.stringify(merged));
+  return merged;
+}
+
+function applyAutoLaunch(enable, addToApps) {
+  if (process.platform === "linux") {
+    const exePath = process.env.APPIMAGE || process.execPath;
+
+    const desktopContent = [
+      "[Desktop Entry]",
+      "Type=Application",
+      "Name=MemeOverlay",
+      `Exec=${exePath}`,
+      "Hidden=false",
+      "NoDisplay=false",
+      "X-GNOME-Autostart-enabled=true",
+    ].join("\n") + "\n";
+
+    const autostartDir = path.join(os.homedir(), ".config", "autostart");
+    const autostartFile = path.join(autostartDir, "memeoverlay.desktop");
+    if (enable) {
+      fs.mkdirSync(autostartDir, { recursive: true });
+      fs.writeFileSync(autostartFile, desktopContent);
+    } else {
+      try { fs.unlinkSync(autostartFile); } catch {}
+    }
+
+    const appsDir = path.join(os.homedir(), ".local", "share", "applications");
+    const appsFile = path.join(appsDir, "memeoverlay.desktop");
+    if (addToApps) {
+      fs.mkdirSync(appsDir, { recursive: true });
+      fs.writeFileSync(appsFile, desktopContent);
+    } else {
+      try { fs.unlinkSync(appsFile); } catch {}
+    }
+  } else {
+    app.setLoginItemSettings({ openAtLogin: enable, path: process.execPath });
+  }
+}
+
+function registerCloseShortcut(key) {
+  if (currentShortcut) {
+    try { globalShortcut.unregister(currentShortcut); } catch {}
+    currentShortcut = null;
+  }
+  if (!key) return;
+  try {
+    const ok = globalShortcut.register(key, () => {
+      overlayWin?.webContents.send("close-meme");
+    });
+    if (ok) currentShortcut = key;
+  } catch {}
 }
 
 function makeTrayIcon(active) {
@@ -37,7 +100,7 @@ function makeTrayIcon(active) {
 }
 
 function updateTrayMenu() {
-  const menu = Menu.buildFromTemplate([
+  const items = [
     { label: isPaused ? "⏸  En pause" : "✅  Actif", enabled: false },
     { type: "separator" },
     {
@@ -50,14 +113,26 @@ function updateTrayMenu() {
         updateTrayMenu();
       }
     },
-    {
-      label: "Se reconnecter…",
-      click: () => showSetup()
-    },
+    { label: "Paramètres…", click: () => showSetup() },
     { type: "separator" },
-    { label: "Quitter", click: () => app.quit() }
-  ]);
-  tray.setContextMenu(menu);
+  ];
+
+  if (app.isPackaged) {
+    items.push({
+      label: "Vérifier les mises à jour",
+      click: () => {
+        try {
+          const { autoUpdater } = require("electron-updater");
+          autoUpdater.checkForUpdates();
+        } catch {}
+      }
+    });
+    items.push({ type: "separator" });
+  }
+
+  items.push({ label: "Quitter", click: () => app.quit() });
+
+  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
 function createTray() {
@@ -69,7 +144,7 @@ function createTray() {
 function createSetupWindow() {
   const win = new BrowserWindow({
     width: 420,
-    height: 260,
+    height: 520,
     resizable: false,
     alwaysOnTop: true,
     frame: true,
@@ -120,29 +195,45 @@ function createOverlayWindow(serverUrl) {
   }
 }
 
+function registerSaveConfigOnce(callback) {
+  if (saveConfigListenerActive) ipcMain.removeAllListeners("save-config");
+  saveConfigListenerActive = true;
+  ipcMain.once("save-config", (event, config) => {
+    saveConfigListenerActive = false;
+    callback(config);
+  });
+}
+
+function handleSaveConfig(config) {
+  const saved = saveConfigToFile(config);
+  applyAutoLaunch(saved.autoLaunch, saved.addToApps);
+  registerCloseShortcut(saved.closeShortcut);
+  overlayWin?.webContents.send("update-settings", {
+    volume: saved.volume,
+    mediaSize: saved.mediaSize,
+  });
+  return saved;
+}
+
 function showSetup() {
-  // Ferme l'overlay actuel
   if (overlayWin && !overlayWin.isDestroyed()) {
     overlayWin.close();
     overlayWin = null;
   }
-
   if (tray) {
     tray.setImage(makeTrayIcon(false));
     tray.setToolTip("MemeOverlay — Déconnecté");
   }
 
   const setup = createSetupWindow();
-
-  ipcMain.once("save-config", (event, userId, serverUrl) => {
-    saveConfig({ discordUserId: userId, serverUrl });
+  registerSaveConfigOnce((config) => {
+    const saved = handleSaveConfig(config);
     setup.close();
-    createOverlayWindow(serverUrl);
+    createOverlayWindow(saved.serverUrl);
   });
 }
 
 app.whenReady().then(() => {
-  // Bypass les restrictions d'embed YouTube (bloqué depuis localhost)
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ["*://*.youtube.com/*", "*://*.googlevideo.com/*"] },
     (details, callback) => {
@@ -162,18 +253,27 @@ app.whenReady().then(() => {
     }
   );
 
-
   const config = loadConfig();
+  applyAutoLaunch(config.autoLaunch, config.addToApps);
+  registerCloseShortcut(config.closeShortcut);
 
   if (!config.discordUserId || !config.serverUrl) {
     const setup = createSetupWindow();
-    ipcMain.once("save-config", (event, userId, serverUrl) => {
-      saveConfig({ discordUserId: userId, serverUrl });
+    registerSaveConfigOnce((newConfig) => {
+      const saved = handleSaveConfig(newConfig);
       setup.close();
-      createOverlayWindow(serverUrl);
+      createOverlayWindow(saved.serverUrl);
     });
   } else {
     createOverlayWindow(config.serverUrl);
+  }
+
+  if (app.isPackaged) {
+    try {
+      const { autoUpdater } = require("electron-updater");
+      autoUpdater.logger = null;
+      autoUpdater.checkForUpdatesAndNotify();
+    } catch {}
   }
 });
 
@@ -181,3 +281,4 @@ ipcMain.handle("get-user-id", () => loadConfig().discordUserId || null);
 ipcMain.handle("get-config",  () => loadConfig());
 
 app.on("window-all-closed", () => { /* géré par le tray */ });
+app.on("will-quit", () => globalShortcut.unregisterAll());

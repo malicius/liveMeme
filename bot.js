@@ -10,8 +10,27 @@ const client = new Client({
 });
 
 const VALID_POSITIONS = ["tl", "t", "tr", "l", "c", "r", "bl", "b", "br"];
-const VIDEO_EXT = /\.(mp4|webm|mov|mkv|avi|m4v)(\?.*)?$/i;
-const YOUTUBE_URL = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/i;
+const VIDEO_EXT    = /\.(mp4|webm|mov|mkv|avi|m4v)(\?.*)?$/i;
+const YOUTUBE_URL  = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/i;
+const TENOR_URL    = /^https?:\/\/(www\.)?tenor\.com\//i;
+const GIPHY_MEDIA  = /^https?:\/\/media[0-9]*\.giphy\.com\//i;
+const GIPHY_PAGE   = /^https?:\/\/(www\.)?giphy\.com\/gifs\//i;
+
+async function resolveMediaUrl(url) {
+  if (TENOR_URL.test(url) || GIPHY_PAGE.test(url)) {
+    try {
+      const res  = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+      const html = await res.text();
+      const video = html.match(/property="og:video(?::url)?"\s+content="([^"]+)"/i)
+                 || html.match(/content="([^"]+)"\s+property="og:video(?::url)?"/i);
+      const image = html.match(/property="og:image"\s+content="([^"]+)"/i)
+                 || html.match(/content="([^"]+)"\s+property="og:image"/i);
+      if (video?.[1]) return { url: video[1], type: "video" };
+      if (image?.[1]) return { url: image[1], type: "image" };
+    } catch {}
+  }
+  return null;
+}
 
 function parseFlags(content) {
   let text = content;
@@ -163,6 +182,14 @@ client.on("messageCreate", async (message) => {
 
   if (!mediaUrl) {
     return message.reply("Ajoute une image/vidéo en pièce jointe ou colle un lien dans le message !");
+  }
+
+  // Résolution Tenor / Giphy page → URL directe
+  if (TENOR_URL.test(mediaUrl) || GIPHY_PAGE.test(mediaUrl)) {
+    const resolved = await resolveMediaUrl(mediaUrl);
+    if (resolved) { mediaUrl = resolved.url; mediaType = resolved.type; }
+  } else if (GIPHY_MEDIA.test(mediaUrl)) {
+    mediaType = "image";
   }
 
   // Mode audio seul : on garde youtube pour traitement serveur, video → audio

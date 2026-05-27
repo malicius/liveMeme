@@ -7,6 +7,11 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@700&display=swap');
 
+    :root {
+      --media-max-w: 40vw;
+      --media-max-h: 45vh;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     html, body {
@@ -31,7 +36,6 @@
 
     #overlay.visible { opacity: 1; }
 
-    /* ── 9 positions ── */
     #overlay.pos-tl { align-items: flex-start;  justify-content: flex-start; }
     #overlay.pos-t  { align-items: center;       justify-content: flex-start; }
     #overlay.pos-tr { align-items: flex-end;     justify-content: flex-start; }
@@ -43,13 +47,12 @@
     #overlay.pos-br { align-items: flex-end;     justify-content: flex-end;   }
 
     #media-wrap {
-      max-width: 40vw;
-      max-height: 45vh;
+      max-width: var(--media-max-w);
+      max-height: var(--media-max-h);
       border-radius: 16px;
       overflow: hidden;
       box-shadow: 0 8px 40px rgba(0,0,0,0.5);
       animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-      /* Force un calque de composition séparé — fix rendu vidéo dans fenêtre transparente */
       transform: translateZ(0);
       -webkit-transform: translateZ(0);
       will-change: transform;
@@ -58,8 +61,8 @@
 
     #media-wrap img {
       display: block;
-      max-width: 40vw;
-      max-height: 45vh;
+      max-width: var(--media-max-w);
+      max-height: var(--media-max-h);
       width: auto;
       height: auto;
       object-fit: contain;
@@ -69,13 +72,12 @@
       display: block;
       width: 560px;
       height: 315px;
-      max-width: 40vw;
-      max-height: 45vh;
+      max-width: var(--media-max-w);
+      max-height: var(--media-max-h);
       object-fit: contain;
       background: transparent;
       transition: opacity 0.2s ease;
     }
-
 
     #caption {
       margin-top: 1rem;
@@ -118,11 +120,40 @@
 
   <script>
     const POSITIONS = ["tl","t","tr","l","c","r","bl","b","br"];
+    const SIZE_MAP = {
+      small:    { w: "25vw",  h: "30vh"  },
+      medium:   { w: "40vw",  h: "45vh"  },
+      large:    { w: "65vw",  h: "70vh"  },
+      original: { w: "90vw",  h: "85vh"  },
+    };
 
-    let paused = false;
+    let paused    = false;
+    let volume    = 1.0;
+    let mediaSize = "medium";
+
+    const queue   = [];
+    let isShowing = false;
+
+    function applySize() {
+      const s = SIZE_MAP[mediaSize] || SIZE_MAP.medium;
+      document.documentElement.style.setProperty("--media-max-w", s.w);
+      document.documentElement.style.setProperty("--media-max-h", s.h);
+    }
+
     window.electron.onPause((val) => { paused = val; });
 
+    window.electron.onCloseMeme(() => hideMeme());
+
+    window.electron.onUpdateSettings((settings) => {
+      if (settings.volume    != null) volume    = settings.volume;
+      if (settings.mediaSize != null) { mediaSize = settings.mediaSize; applySize(); }
+    });
+
     async function init() {
+      const config = await window.electron.getConfig();
+      if (config.volume    != null) volume    = config.volume;
+      if (config.mediaSize != null) { mediaSize = config.mediaSize; applySize(); }
+
       const userId = await window.electron.getUserId();
       const socket = io();
 
@@ -131,106 +162,109 @@
       });
 
       socket.on("meme", (payload) => {
-        if (!paused) showMeme(payload);
+        if (!paused) enqueue(payload);
       });
     }
 
+    function enqueue(payload) {
+      if (!isShowing) {
+        showMeme(payload);
+      } else {
+        queue.push(payload);
+      }
+    }
+
+    function processQueue() {
+      isShowing = false;
+      if (queue.length > 0) {
+        setTimeout(() => showMeme(queue.shift()), 400);
+      }
+    }
+
     function playSound() {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
+      const ctx  = new AudioContext();
+      const osc  = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.type = "sine";
       osc.frequency.setValueAtTime(880, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.setValueAtTime(0.4 * volume, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.6);
     }
 
     function showMeme({ mediaUrl, mediaType, text, senderName, duration = 2, position = "c", sound = false, start = 0 }) {
+      isShowing = true;
       const overlay = document.getElementById("overlay");
 
-      // Position
       POSITIONS.forEach(p => overlay.classList.remove(`pos-${p}`));
       overlay.classList.add(`pos-${POSITIONS.includes(position) ? position : "c"}`);
 
-      // Media
       const wrap = document.getElementById("media-wrap");
       wrap.innerHTML = "";
       wrap.style.display = "";
-      if (mediaType === "youtube-stream") {
-        mediaUrl = window.location.origin + mediaUrl;
-        mediaType = "video";
-      }
 
-      if (mediaType === "youtube-audio") {
-        mediaUrl = window.location.origin + mediaUrl;
-        mediaType = "audio";
-      }
+      if (mediaType === "youtube-stream") { mediaUrl = window.location.origin + mediaUrl; mediaType = "video"; }
+      if (mediaType === "youtube-audio")  { mediaUrl = window.location.origin + mediaUrl; mediaType = "audio"; }
 
       if (mediaType === "audio") {
         const a = document.createElement("audio");
         a.src = mediaUrl;
         a.autoplay = true;
         a.muted = false;
-        if (start > 0) {
-          a.addEventListener("loadedmetadata", () => { a.currentTime = start; }, { once: true });
-        }
+        a.volume = volume;
+        if (start > 0) a.addEventListener("loadedmetadata", () => { a.currentTime = start; }, { once: true });
         a.addEventListener("error", () => console.error("Audio error:", a.error?.code, a.src));
         wrap.appendChild(a);
         a.play().catch(e => console.error("Audio autoplay blocked:", e));
-        // Pas de visuel pour l'audio seul
         wrap.style.display = "none";
+
       } else if (mediaType === "video") {
         const v = document.createElement("video");
         v.src = mediaUrl;
         v.autoplay = true;
         v.loop = true;
         v.muted = false;
+        v.volume = volume;
         v.playsInline = true;
         v.style.opacity = "0";
-        if (start > 0) {
-          v.addEventListener("loadedmetadata", () => { v.currentTime = start; }, { once: true });
-        }
-        v.addEventListener("canplay", () => { v.style.opacity = "1"; }, { once: true });
-        v.addEventListener("error", () => console.error("Video error:", v.error?.code, v.error?.message, v.src));
+        if (start > 0) v.addEventListener("loadedmetadata", () => { v.currentTime = start; }, { once: true });
+        v.addEventListener("canplay",  () => { v.style.opacity = "1"; }, { once: true });
+        v.addEventListener("error",    () => console.error("Video error:", v.error?.code, v.error?.message, v.src));
         wrap.appendChild(v);
         v.play().catch(e => console.error("Autoplay blocked:", e));
+
       } else if (mediaType === "image") {
         const img = document.createElement("img");
         img.src = mediaUrl;
         wrap.appendChild(img);
       }
 
-      // Caption
       const cap = document.getElementById("caption");
       cap.textContent = text || "";
       cap.style.display = text ? "block" : "none";
 
-      // Expéditeur
-      // Affichage
       overlay.classList.remove("hiding");
       overlay.classList.add("visible");
 
-      // Son
       if (sound) playSound();
 
-      // Auto-fermeture
       clearTimeout(window._autoClose);
       window._autoClose = setTimeout(hideMeme, duration * 1000);
     }
 
     function hideMeme() {
+      clearTimeout(window._autoClose);
       const overlay = document.getElementById("overlay");
       overlay.classList.add("hiding");
       setTimeout(() => {
         overlay.classList.remove("visible", "hiding");
         document.getElementById("media-wrap").innerHTML = "";
+        processQueue();
       }, 300);
-      clearTimeout(window._autoClose);
     }
 
     init();
