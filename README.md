@@ -1,99 +1,161 @@
-# 🎭 MemeScreen POC
+# MemeScreen v1.2.1
 
-Envoie des memes depuis Discord directement sur l'écran de quelqu'un — par-dessus toutes ses autres applications, en fond transparent.
+Envoie des memes depuis Discord directement sur l'écran de quelqu'un — par-dessus toutes ses autres applications, en fond transparent, en temps réel.
 
 ## Architecture
 
 ```
 Discord Channel
-     │
+     │  !send @user [url ou pièce jointe] [texte] [options]
      ▼
- Bot Discord  ──POST──▶  Serveur Express + Socket.io
-  (bot.js)               (server.js)
-                              │
-                         Socket.io emit
-                              │
-                              ▼
-                    App Electron (overlay-app/)
-                    • Fenêtre 100% transparente
-                    • Always-on-top
-                    • Click-through quand idle
+ bot.js (discord.js)
+     │  POST /api/send-meme
+     ▼
+ server.js (Express + Socket.io)  ←  hébergé sur livememe.romaincampanha.ch
+     │  socket.emit("meme", payload)
+     ▼
+ overlay-app/ (Electron)
+     • Fenêtre 100% transparente, always-on-top
+     • Click-through quand idle
+     • File d'attente si plusieurs memes arrivent en même temps
 ```
 
 ## Structure du projet
 
 ```
-meme-poc/
-├── server.js          ← Serveur Express + Socket.io
+liveMeme/
+├── server.js          ← Serveur Express + Socket.io (port auto via env)
 ├── bot.js             ← Bot Discord
 ├── package.json       ← Dépendances serveur/bot
 ├── .env               ← Config (token Discord, etc.)
 └── overlay-app/
-    ├── main.js        ← Electron (fenêtre transparente)
-    ├── preload.js     ← Bridge sécurisé Electron ↔ page
+    ├── main.js        ← Electron (fenêtre transparente, tray, raccourcis)
+    ├── preload.js     ← Bridge contextIsolation
     ├── overlay.html   ← Interface du meme
+    ├── setup.html     ← Écran de configuration
     └── package.json   ← Dépendances Electron
 ```
 
-## Setup
+## Déploiement serveur (Infomaniak)
 
-### 1. Serveur + Bot
+Le serveur et le bot tournent sur `livememe.romaincampanha.ch`.
+
 ```bash
+# Cloner le repo sur le serveur
+git clone https://github.com/malicius/liveMeme.git /sites/livememe.romaincampanha.ch/liveMeme
+cd /sites/livememe.romaincampanha.ch/liveMeme
 npm install
-cp .env.example .env   # remplis DISCORD_TOKEN + MEME_CHANNEL_ID
-npm run dev            # lance serveur et bot en parallèle
+
+# Créer le .env
+cp .env.example .env
+nano .env   # remplir DISCORD_TOKEN, MEME_CHANNEL_ID, SERVER_URL
+
+# Lancer avec PM2
+./node_modules/.bin/pm2 start bot.js --name memescreen-bot
+./node_modules/.bin/pm2 save
+
+# Mises à jour
+git pull && ./node_modules/.bin/pm2 restart memescreen-bot
 ```
 
-### 2. App Electron (chez chaque destinataire)
+Le serveur Node.js est géré par Infomaniak (point d'entrée : `server.js`).
+
+## App Electron (chez chaque destinataire)
+
+Télécharge le fichier depuis les [Releases GitHub](https://github.com/malicius/liveMeme/releases) :
+
+| Plateforme | Fichier |
+|---|---|
+| Windows | `MemeOverlay.exe` — portable, aucune installation |
+| Linux | `MemeOverlay.AppImage` — rendre exécutable puis lancer |
+
 ```bash
-cd overlay-app
-npm install
-npm start
+# Linux uniquement
+chmod +x MemeOverlay.AppImage && ./MemeOverlay.AppImage
 ```
-Au premier lancement, l'app demande le Discord User ID de l'utilisateur.
 
-## Comment utiliser
+Au premier lancement, l'app demande :
+- Le **Discord User ID**
+- L'**URL du serveur** : `http://livememe.romaincampanha.ch`
 
-Dans le channel Discord dédié :
+## Commandes Discord
+
+Dans le channel dédié :
+
 ```
-!send @Jean lol t'as vu ça ?
+!send @user [url ou pièce jointe] [texte] [options]
+!send @everyone [url ou pièce jointe] [texte]
+!who
+!help
 ```
-+ une image ou vidéo en pièce jointe
 
-→ Le meme apparaît au centre de l'écran de Jean, par-dessus tout.
-→ Il disparaît après 12 secondes ou avec le bouton Fermer / Échap.
-→ Entre les memes, la fenêtre est invisible et click-through (ça ne gêne pas du tout).
+**Sources média supportées :**
+- Pièce jointe Discord (image, gif, vidéo)
+- Lien direct (image, gif, `.mp4`, `.webm`…)
+- YouTube (`youtube.com/watch`, `youtu.be`, Shorts)
+- Tenor (`tenor.com/...`)
+- Giphy (`giphy.com/gifs/...` ou lien direct `media.giphy.com`)
+
+**Options :**
+
+| Option | Description | Défaut |
+|---|---|---|
+| `--time N` | Durée d'affichage en secondes (1–10) | `2` |
+| `--pos X` | Position sur l'écran (voir grille) | `c` |
+| `--sound` | Son à l'apparition | off |
+| `--start N` | Démarre la vidéo/YouTube à N secondes | `0` |
+| `--audio` | Son uniquement (pas d'image) | off |
+
+**Grille des positions (`--pos`) :**
+```
+tl  │  t  │  tr
+────┼─────┼────
+ l  │  c  │  r
+────┼─────┼────
+bl  │  b  │  br
+```
+
+**Exemples :**
+```
+!send @Jean https://tenor.com/xyz.gif --pos tr --time 5
+!send @everyone --sound + gif en pièce jointe
+!send @Jean https://youtu.be/dQw4w9WgXcQ --start 43 --time 10
+!send @Jean https://youtu.be/xyz --audio
+```
+
+## Paramètres de l'overlay (tray → Paramètres…)
+
+| Paramètre | Options |
+|---|---|
+| Taille du média | Petit / Moyen / Grand / Taille originale |
+| Volume | 0 – 100% |
+| Raccourci fermeture | Touche configurable (défaut : Échap) |
+| Lancer au démarrage | On / Off |
+| Menu des applications | On / Off (Linux) |
 
 ## Comportement de l'overlay
 
 | État | Fenêtre | Souris |
 |---|---|---|
-| Idle (pas de meme) | Invisible | Passe à travers |
-| Meme affiché | Visible au centre | Clics actifs (bouton fermer) |
+| Idle | Invisible | Passe à travers |
+| Meme affiché | Visible | Click-through (pas de blocage) |
+| Plusieurs memes en attente | File d'attente — affichés l'un après l'autre | — |
 
 ## Créer le bot Discord
 
-1. https://discord.com/developers/applications → New Application → Bot
+1. [discord.com/developers](https://discord.com/developers) → New Application → Bot
 2. Copie le **Token**
 3. Active : **Server Members Intent** + **Message Content Intent**
-4. Invite sur ton serveur avec : `Read Messages`, `Send Messages`, `Add Reactions`
+4. Invite avec les permissions : `Read Messages`, `Send Messages`, `Add Reactions`
 
 ## Debug
 
-Tester sans Discord (curl) :
 ```bash
-curl -X POST http://localhost:3000/api/send-meme \
+# Voir les utilisateurs connectés
+curl http://livememe.romaincampanha.ch/api/users
+
+# Envoyer un meme manuellement
+curl -X POST http://livememe.romaincampanha.ch/api/send-meme \
   -H "Content-Type: application/json" \
   -d '{"targetUserId":"TON_ID","mediaUrl":"https://i.imgur.com/xyz.jpg","mediaType":"image","text":"LOL","senderName":"Test"}'
 ```
-
-Voir les utilisateurs connectés :
-```
-GET http://localhost:3000/api/users
-```
-
-
-### Note
-
-- ajouter que un sond
-- regler la force du sond

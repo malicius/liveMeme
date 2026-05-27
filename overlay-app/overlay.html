@@ -162,7 +162,9 @@
       });
 
       socket.on("meme", (payload) => {
-        if (!paused) enqueue(payload);
+        if (paused) return;
+        if (payload.mediaType === "emote-wall") showEmoteWall(payload);
+        else enqueue(payload);
       });
     }
 
@@ -265,6 +267,90 @@
         document.getElementById("media-wrap").innerHTML = "";
         processQueue();
       }, 300);
+    }
+
+    function showEmoteWall({ mediaUrl, text, count = 40, duration = 8 }) {
+      document.getElementById("emote-wall-container")?.remove();
+
+      const container = document.createElement("div");
+      container.id = "emote-wall-container";
+      container.style.cssText = "position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:999;";
+      document.body.appendChild(container);
+
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const GRAVITY  = 0.38;
+      const BOUNCE   = 0.60;
+      const FRICTION = 0.978;
+      const particles = [];
+
+      for (let i = 0; i < count; i++) {
+        const size = 48 + Math.random() * 40;
+        let el;
+
+        if (mediaUrl) {
+          el = document.createElement("img");
+          el.src = mediaUrl;
+          el.style.cssText = `position:absolute;width:${size}px;height:${size}px;object-fit:contain;border-radius:6px;`;
+        } else {
+          el = document.createElement("span");
+          el.textContent = text || "💥";
+          el.style.cssText = `position:absolute;font-size:${size}px;line-height:1;user-select:none;`;
+        }
+        el.style.opacity = "0";
+        container.appendChild(el);
+
+        particles.push({
+          el, size,
+          active: false,
+          activateAt: (i / count) * Math.min(duration * 0.55, 3.5),
+          x: Math.random() * (W - size),
+          y: -size - Math.random() * 300,
+          vx: (Math.random() - 0.5) * 9,
+          vy: 1.5 + Math.random() * 4,
+          rot: Math.random() * 360,
+          vrot: (Math.random() - 0.5) * 9,
+        });
+      }
+
+      const startTime = performance.now();
+
+      function tick(now) {
+        const elapsed     = (now - startTime) / 1000;
+        const fadeStart   = duration - 1.5;
+        const globalAlpha = elapsed > fadeStart ? Math.max(0, (duration - elapsed) / 1.5) : 1;
+
+        for (const p of particles) {
+          if (!p.active) {
+            if (elapsed >= p.activateAt) p.active = true;
+            else continue;
+          }
+
+          p.vy  += GRAVITY;
+          p.vx  *= FRICTION;
+          p.x   += p.vx;
+          p.y   += p.vy;
+          p.rot += p.vrot;
+          p.vrot *= 0.996;
+
+          if (p.x < 0)          { p.x = 0;          p.vx =  Math.abs(p.vx) * BOUNCE; }
+          if (p.x > W - p.size) { p.x = W - p.size; p.vx = -Math.abs(p.vx) * BOUNCE; }
+          if (p.y > H - p.size) {
+            p.y  = H - p.size;
+            p.vy = -Math.abs(p.vy) * BOUNCE;
+            p.vx *= FRICTION;
+            if (Math.abs(p.vy) < 0.8) p.vy = 0;
+          }
+
+          p.el.style.transform = `translate(${p.x}px,${p.y}px) rotate(${p.rot}deg)`;
+          p.el.style.opacity   = globalAlpha;
+        }
+
+        if (elapsed < duration) requestAnimationFrame(tick);
+        else container.remove();
+      }
+
+      requestAnimationFrame(tick);
     }
 
     init();

@@ -138,9 +138,9 @@ app.get("/api/yt-audio/:videoId", async (req, res) => {
 });
 
 app.post("/api/send-meme", (req, res) => {
-  const { targetUserId, mediaUrl, mediaType, text, senderName, duration, position, sound, start, audioOnly } = req.body;
+  const { targetUserId, mediaUrl, mediaType, text, senderName, duration, position, sound, start, audioOnly, count } = req.body;
 
-  if (!targetUserId || !mediaUrl) {
+  if (!targetUserId || (!mediaUrl && mediaType !== "emote-wall")) {
     return res.status(400).json({ error: "targetUserId et mediaUrl sont requis" });
   }
 
@@ -175,9 +175,10 @@ app.post("/api/send-meme", (req, res) => {
     position: position ?? "c",
     sound: sound ?? false,
     start: start ?? 0,
+    count: count ?? 40,
   });
 
-  console.log(`[meme] ${senderName} -> ${targetUserId} | ${position} | ${duration}s`);
+  console.log(`[meme] ${senderName} -> ${targetUserId} | ${resolvedType} | ${duration}s`);
   res.json({ status: "sent" });
 });
 

@@ -39,6 +39,7 @@ function parseFlags(content) {
   let sound = false;
   let start = 0;
   let urlFromText = null;
+  let count = 40;
 
   text = text.replace(/--time\s+(\d+)/i, (_, n) => {
     duration = Math.min(10, Math.max(1, parseInt(n)));
@@ -66,13 +67,18 @@ function parseFlags(content) {
     return "";
   });
 
+  text = text.replace(/--count\s+(\d+)/i, (_, n) => {
+    count = Math.min(200, Math.max(5, parseInt(n)));
+    return "";
+  });
+
   // Extraire une URL si présente dans le message
   text = text.replace(/https?:\/\/\S+/gi, (url) => {
     if (!urlFromText) urlFromText = url;
     return "";
   });
 
-  return { text: text.trim(), duration, position, sound, start, audioOnly, urlFromText };
+  return { text: text.trim(), duration, position, sound, start, audioOnly, urlFromText, count };
 }
 
 client.once("ready", () => {
@@ -85,19 +91,23 @@ const HELP_MESSAGE = `
 \`\`\`
 !send @user [url ou pièce jointe] [texte] [options]
 !send @everyone [url ou pièce jointe] [texte] [options]
+!wall @user [emoji ou image] [options]
+!wall @everyone [emoji ou image] [options]
 !who
 \`\`\`
 
-**Source du média** (l'un ou l'autre) :
-• Pièce jointe — image, gif ou vidéo directement dans le message
-• Lien URL — image, gif, vidéo (.mp4 .webm…) ou lien YouTube
+**Sources supportées :** pièce jointe · image/gif/vidéo · YouTube · Tenor · Giphy
 
-**Options :**
-\`--time N\` — durée d'affichage en secondes (1–10, défaut : **2**)
-\`--pos X\` — position sur l'écran (défaut : **c**)
-\`--sound\` — joue un son à l'apparition du meme
-\`--start N\` — démarre la vidéo/YouTube à N secondes (ex: \`--start 30\`)
-\`--audio\` — joue uniquement le son d'une vidéo/YouTube (sans image)
+**Options !send :**
+\`--time N\` — durée en secondes (1–10, défaut : **2**)
+\`--pos X\` — position (défaut : **c**)
+\`--sound\` — son à l'apparition
+\`--start N\` — démarre à N secondes
+\`--audio\` — son uniquement
+
+**Options !wall :**
+\`--time N\` — durée en secondes (défaut : **8**)
+\`--count N\` — nombre de particules (5–200, défaut : **40**)
 
 **Grille des positions (\`--pos\`) :**
 \`\`\`
@@ -109,13 +119,12 @@ bl  │  b  │  br
 \`\`\`
 
 **Exemples :**
-\`!who\` — voir qui a l'overlay ouvert
+\`!who\`
 \`!send @Jean\` + image en pièce jointe
-\`!send @everyone\` + gif — envoie à tous les connectés
-\`!send @Jean c'est toi --time 5 --pos tr\` + gif en pièce jointe
-\`!send @Jean https://i.imgur.com/xyz.gif --pos bl --time 8\`
-\`!send @Jean https://youtu.be/dQw4w9WgXcQ --start 43 --time 10 --sound\`
-\`!send @Jean https://youtu.be/dQw4w9WgXcQ --audio\` — son seulement
+\`!send @Jean https://youtu.be/xyz --start 43 --time 10 --sound\`
+\`!wall @Jean 🔥\` — pluie de 🔥 pendant 8s
+\`!wall @everyone 💀 --count 80 --time 12\`
+\`!wall @Jean\` + gif en pièce jointe — pluie d'images
 `.trim();
 
 client.on("messageCreate", async (message) => {
@@ -143,6 +152,73 @@ client.on("messageCreate", async (message) => {
     } catch {
       return message.reply("❌ Impossible de joindre le serveur.");
     }
+  }
+
+  // ── !wall ────────────────────────────────────────────────────────────────
+  if (message.content.startsWith("!wall")) {
+    const isEveryone = message.mentions.everyone;
+    const mention    = isEveryone ? null : message.mentions.users.first();
+
+    if (!mention && !isEveryone) {
+      return message.reply("Usage : `!wall @user [emoji ou image] [--time 5-30] [--count 10-200]`");
+    }
+
+    const raw = message.content
+      .slice(5)
+      .replace(/<@!?[0-9]+>/g, "")
+      .replace(/@everyone|@here/gi, "")
+      .trim();
+
+    const { text, duration: parsedDuration, count, urlFromText } = parseFlags(raw);
+    const duration = parsedDuration === 2 ? 8 : parsedDuration;
+
+    let mediaUrl = null;
+    const attachment = message.attachments.first();
+    if (attachment) {
+      mediaUrl = attachment.url;
+    } else if (urlFromText) {
+      mediaUrl = urlFromText;
+      if (TENOR_URL.test(mediaUrl) || GIPHY_PAGE.test(mediaUrl)) {
+        const resolved = await resolveMediaUrl(mediaUrl);
+        if (resolved) mediaUrl = resolved.url;
+      }
+    }
+
+    if (!mediaUrl && !text) {
+      return message.reply("Ajoute un emoji, une image ou un lien !");
+    }
+
+    const senderName = message.member?.displayName || message.author.username;
+    const payload    = { mediaUrl, mediaType: "emote-wall", text, senderName, duration, count };
+
+    if (isEveryone) {
+      try {
+        const ids = await fetch(`${process.env.SERVER_URL}/api/users`).then(r => r.json());
+        if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
+        await Promise.all(ids.map(id =>
+          fetch(`${process.env.SERVER_URL}/api/send-meme`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targetUserId: id, ...payload }),
+          })
+        ));
+        await message.react("✅");
+        await message.reply(`🌊 Emote wall envoyé à **${ids.length}** utilisateur(s).`);
+      } catch { await message.reply("❌ Impossible de joindre le serveur."); }
+      return;
+    }
+
+    try {
+      const res  = await fetch(`${process.env.SERVER_URL}/api/send-meme`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: mention.id, ...payload }),
+      });
+      const data = await res.json();
+      if (data.status === "sent") await message.react("✅");
+      else await message.reply(`❌ ${mention.username} n'est pas connecté(e) à l'overlay.`);
+    } catch { await message.reply("❌ Impossible de joindre le serveur."); }
+    return;
   }
 
   if (!message.content.startsWith("!send")) return;
