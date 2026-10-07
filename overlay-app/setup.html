@@ -12,10 +12,10 @@
       color: #f8fafc;
       padding: 20px;
       height: 100vh;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: #334155 #0f172a;
+      overflow-y: scroll;
+      scrollbar-width: none;
     }
+    body::-webkit-scrollbar { display: none; }
     h2 {
       font-size: 0.75rem;
       color: #94a3b8;
@@ -97,9 +97,9 @@
     .btn-add:hover { background: #475569; }
 
     .btn-save {
-      position: sticky; bottom: 0; width: 100%; padding: 12px; border-radius: 10px;
+      position: sticky; bottom: 0; width: 100%; padding: 14px; border-radius: 10px;
       border: none; background: #8b5cf6; color: #fff; font-size: 1rem; font-weight: 700;
-      cursor: pointer; margin-top: 20px; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+      cursor: pointer; margin-top: 30px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
     }
     .btn-save:hover { background: #7c3aed; transform: translateY(-1px); }
 
@@ -304,6 +304,7 @@
       }).then(r => {
         if (!r.ok) throw new Error();
         window.electron.saveConfig(config);
+        alert("Configuration enregistrée !");
       }).catch(() => {
         alert("Impossible de sauvegarder sur le serveur. Vérifie ton token et l'URL.");
       });

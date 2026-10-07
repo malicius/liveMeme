@@ -149,6 +149,8 @@ function updateTrayMenu() {
         try {
           const { autoUpdater } = require("electron-updater");
           autoUpdater.checkForUpdatesAndNotify();
+          const { Notification } = require("electron");
+          new Notification({ title: "MemeOverlay", body: "Recherche de mises à jour..." }).show();
         } catch {}
       }
     });

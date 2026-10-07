@@ -17,7 +17,7 @@ if (!API_KEY || !LINK_SECRET) {
   process.exit(1);
 }
 
-const PORT = process.env.PORT || 38283;
+const PORT = process.env.PORT || 38284;
 const SERVER_ORIGIN = (process.env.SERVER_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 
 // setup.html est chargé en file:// → Origin "null" ou absent. On l'autorise :
@@ -372,6 +372,31 @@ app.put("/api/lists", requireApiKey, (req, res) => {
   lists[userId] = { mode, ids: clean };
   saveLists();
   res.json(lists[userId]);
+});
+
+function requireToken(req, res, next) {
+  const m = /^Bearer (.+)$/.exec(req.headers.authorization || "");
+  const userId = m && verifyToken(m[1]);
+  if (!userId) return res.status(401).json({ error: "Token invalide" });
+  req.userId = userId;
+  next();
+}
+
+app.get("/api/me/history", requireToken, (req, res) => {
+  res.json(historyStore[req.userId] || []);
+});
+
+app.get("/api/me/lists", requireToken, (req, res) => {
+  res.json(userLists(req.userId));
+});
+
+app.put("/api/me/lists", requireToken, (req, res) => {
+  const { mode, ids } = req.body || {};
+  if (mode !== "blacklist" && mode !== "whitelist") return res.status(400).json({ error: "mode invalide" });
+  const clean = Array.isArray(ids) ? [...new Set(ids.filter(id => typeof id === "string" && /^\d{17,20}$/.test(id)))].slice(0, 200) : [];
+  lists[req.userId] = { mode, ids: clean };
+  saveLists();
+  res.json(lists[req.userId]);
 });
 
 server.listen(PORT, () => {
