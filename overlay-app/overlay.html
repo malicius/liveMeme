@@ -199,6 +199,10 @@
       window.electron.setSocketStatus(socket?.connected, paused);
     });
 
+    window.electron.onCloseMeme(() => {
+      if (isShowing) hideMeme();
+    });
+
     window.electron.onClearQueue(() => {
         queue.length = 0;
         updateQueueBadge();
@@ -268,11 +272,11 @@
       }
     }
 
-    function playSound() {
-      if (alertSound === "none") return;
+    async function playSound() {
+      if (alertSound === "none" || volume <= 0) return;
       try {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+        if (audioCtx.state !== "running") await audioCtx.resume();
 
         const osc  = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -301,7 +305,7 @@
       }
     }
 
-    function showMeme({ mediaUrl, mediaType, text, senderName, duration = 2, position = "c", sound = false, start = 0 }) {
+    function showMeme({ mediaUrl, mediaType, text, senderName, duration = 3, position = "c", sound = true, start = 0 }) {
       isShowing = true;
       const overlay = document.getElementById("overlay");
 
@@ -359,6 +363,7 @@
     function hideMeme() {
       clearTimeout(window._autoClose);
       const overlay = document.getElementById("overlay");
+      if (overlay.classList.contains("hiding")) return;
       overlay.classList.add("hiding");
       setTimeout(() => {
         overlay.classList.remove("visible", "hiding");

@@ -1,6 +1,6 @@
 {
   "name": "memescreen-server",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Serveur + Bot Discord pour MemeScreen",
   "scripts": {
     "start": "node server.js",

@@ -273,7 +273,7 @@ app.post("/api/send-meme", requireApiKey, sendLimiter, (req, res) => {
     return res.status(400).json({ error: "targetUserId requis" });
   }
 
-  const duration = clamp(body.duration, 1, 30, 2);
+  const duration = clamp(body.duration, 1, 30, 3);
   const position = VALID_POSITIONS.includes(body.position) ? body.position : "c";
   const sound = Boolean(body.sound);
   const start = clamp(body.start, 0, 60 * 60 * 12, 0);

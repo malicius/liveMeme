@@ -1,6 +1,6 @@
 {
   "name": "meme-overlay",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Overlay transparent pour recevoir des memes",
   "author": "liveMeme",
   "main": "main.js",

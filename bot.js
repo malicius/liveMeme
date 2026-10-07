@@ -11,73 +11,128 @@ const client = new Client({
 
 const VALID_POSITIONS = ["tl", "t", "tr", "l", "c", "r", "bl", "b", "br"];
 const VIDEO_EXT    = /\.(mp4|webm|mov|mkv|avi|m4v)(\?.*)?$/i;
+const IMAGE_EXT    = /\.(gif|png|jpe?g|webp|avif|bmp|svg)(\?.*)?$/i;
 const YOUTUBE_URL  = /^https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)/i;
-const TENOR_URL    = /^https?:\/\/(www\.)?tenor\.com\//i;
-const GIPHY_MEDIA  = /^https?:\/\/media[0-9]*\.giphy\.com\//i;
-const GIPHY_PAGE   = /^https?:\/\/(www\.)?giphy\.com\/gifs\//i;
 
+const SEND_DEFAULT_DURATION = 3;
+const WALL_DEFAULT_DURATION = 8;
+
+// Discordbot passe les protections anti-bot de la plupart des hébergeurs de GIF (Klipy, Tenor…)
+// puisqu'ils veulent que Discord affiche leur aperçu.
+const RESOLVE_UAS = [
+  "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+];
+
+function decodeEntities(s) {
+  return s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+function parseMetaTags(html) {
+  const metas = [];
+  for (const [tag] of html.matchAll(/<meta\s[^>]*>/gi)) {
+    const attrs = {};
+    for (const [, k, v1, v2] of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+      attrs[k.toLowerCase()] = decodeEntities(v1 ?? v2);
+    }
+    const key = (attrs.property || attrs.name || "").toLowerCase();
+    if (key && attrs.content) metas.push({ key, value: attrs.content });
+  }
+  return metas;
+}
+
+function pickMediaFromMeta(metas) {
+  const all = (...keys) => metas.filter(m => keys.includes(m.key)).map(m => m.value);
+  const video = all("og:video:secure_url", "og:video:url", "og:video", "twitter:player:stream")
+    .find(u => VIDEO_EXT.test(u));
+  const images = all("og:image:secure_url", "og:image:url", "og:image", "twitter:image");
+  const image = images.find(u => /\.gif(\?.*)?$/i.test(u)) || images[0];
+  return { video, image };
+}
+
+// Transforme un lien de page (Klipy, Tenor, Giphy, …) en lien direct vers le média.
+// Renvoie { video, image } (l'un ou l'autre peut manquer) ou null.
 async function resolveMediaUrl(url) {
-  if (TENOR_URL.test(url) || GIPHY_PAGE.test(url)) {
+  for (const ua of RESOLVE_UAS) {
     try {
-      const res  = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-      const html = await res.text();
-      const video = html.match(/property="og:video(?::url)?"\s+content="([^"]+)"/i)
-                 || html.match(/content="([^"]+)"\s+property="og:video(?::url)?"/i);
-      const image = html.match(/property="og:image"\s+content="([^"]+)"/i)
-                 || html.match(/content="([^"]+)"\s+property="og:image"/i);
-      if (video?.[1]) return { url: video[1], type: "video" };
-      if (image?.[1]) return { url: image[1], type: "image" };
+      const res = await fetch(url, { headers: { "User-Agent": ua }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+      const type = res.headers.get("content-type") || "";
+      if (type.startsWith("video/")) { res.body?.cancel(); return { video: res.url }; }
+      if (type.startsWith("image/")) { res.body?.cancel(); return { image: res.url }; }
+      if (!res.ok || !type.includes("html")) { res.body?.cancel(); continue; }
+      const found = pickMediaFromMeta(parseMetaTags(await res.text()));
+      if (found.video || found.image) return found;
     } catch {}
   }
   return null;
 }
 
+const FLAG_ALIASES = {
+  time: "time", t: "time", duree: "time", durée: "time",
+  pos: "pos", p: "pos", position: "pos",
+  sound: "sound", son: "sound",
+  silent: "silent", mute: "silent", nosound: "silent",
+  start: "start", s: "start",
+  audio: "audio", a: "audio",
+  count: "count", c: "count", n: "count",
+};
+const VALUE_FLAGS = new Set(["time", "pos", "start", "count"]);
+
+function readFlagValue(flag, raw) {
+  if (raw == null) return undefined;
+  if (flag === "pos") return VALID_POSITIONS.includes(raw.toLowerCase()) ? raw.toLowerCase() : undefined;
+  const n = parseFloat(raw.replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// Les options peuvent être placées n'importe où après la commande :
+// "!send @x --time 5 lien", "!send @x lien --time=5", "!send @x —time 5" (tiret auto-corrigé sur mobile)…
 function parseFlags(content) {
-  let text = content;
-  let duration = 2;
-  let position = "c";
-  let sound = false;
-  let start = 0;
+  const tokens = content.replace(/[—–‒−]/g, "--").split(/\s+/).filter(Boolean);
+  const flags = {};
+  const words = [];
   let urlFromText = null;
-  let count = 40;
 
-  text = text.replace(/--time\s+(\d+)/i, (_, n) => {
-    duration = Math.min(10, Math.max(1, parseInt(n)));
-    return "";
-  });
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    const url = tok.match(/^<?(https?:\/\/[^\s>]+)>?$/i);
+    if (url) {
+      if (!urlFromText) urlFromText = url[1];
+      continue;
+    }
 
-  text = text.replace(/--pos\s+(\w+)/i, (_, p) => {
-    if (VALID_POSITIONS.includes(p.toLowerCase())) position = p.toLowerCase();
-    return "";
-  });
+    const m = tok.match(/^-{1,2}([a-zéè]+)(?:[=:]?(.+))?$/i);
+    const flag = m && FLAG_ALIASES[m[1].toLowerCase()];
+    if (!flag) { words.push(tok); continue; }
 
-  text = text.replace(/--sound/i, () => {
-    sound = true;
-    return "";
-  });
+    if (!VALUE_FLAGS.has(flag)) {
+      if (m[2] == null) flags[flag] = true; else words.push(tok);
+      continue;
+    }
 
-  text = text.replace(/--start\s+([\d.]+)/i, (_, n) => {
-    start = parseFloat(n);
-    return "";
-  });
+    if (m[2] != null) {
+      const value = readFlagValue(flag, m[2]);
+      if (value === undefined) words.push(tok); else flags[flag] = value;
+      continue;
+    }
+    const value = readFlagValue(flag, tokens[i + 1]);
+    if (value !== undefined) { flags[flag] = value; i++; }
+  }
 
-  let audioOnly = false;
-  text = text.replace(/--audio/i, () => {
-    audioOnly = true;
-    return "";
-  });
+  return {
+    text: words.join(" "),
+    duration: flags.time ?? null,
+    position: flags.pos ?? "c",
+    sound: !flags.silent,
+    start: Math.max(0, flags.start ?? 0),
+    audioOnly: Boolean(flags.audio),
+    count: flags.count != null ? Math.min(200, Math.max(5, Math.round(flags.count))) : 40,
+    urlFromText,
+  };
+}
 
-  text = text.replace(/--count\s+(\d+)/i, (_, n) => {
-    count = Math.min(200, Math.max(5, parseInt(n)));
-    return "";
-  });
-
-  text = text.replace(/https?:\/\/\S+/gi, (url) => {
-    if (!urlFromText) urlFromText = url;
-    return "";
-  });
-
-  return { text: text.trim(), duration, position, sound, start, audioOnly, urlFromText, count };
+function clampDuration(d, max, fallback) {
+  return d == null ? fallback : Math.min(max, Math.max(1, d));
 }
 
 function serverFetch(url, options = {}) {
@@ -123,17 +178,19 @@ const HELP_MESSAGE = `
 !listmode blacklist|whitelist
 \`\`\`
 
-**Sources supportées :** pièce jointe · image/gif/vidéo · YouTube · Tenor · Giphy
+**Sources supportées :** pièce jointe · image/gif/vidéo · YouTube · Tenor · Giphy · Klipy · la plupart des liens de GIF
+
+Les options se placent **n'importe où** après la commande (\`--time 5\`, \`--time=5\`, \`-t 5\`…).
 
 **Options !send :**
-\`--time N\` — durée en secondes (1–10, défaut : **2**)
+\`--time N\` — durée en secondes (1–10, défaut : **${SEND_DEFAULT_DURATION}**)
 \`--pos X\` — position (défaut : **c**)
-\`--sound\` — son à l'apparition
+\`--silent\` — pas de son de notification
 \`--start N\` — démarre à N secondes
 \`--audio\` — son uniquement
 
 **Options !wall :**
-\`--time N\` — durée en secondes (défaut : **8**)
+\`--time N\` — durée en secondes (1–30, défaut : **${WALL_DEFAULT_DURATION}**)
 \`--count N\` — nombre de particules (5–200, défaut : **40**)
 
 **Grille des positions (\`--pos\`) :**
@@ -281,7 +338,7 @@ client.on("messageCreate", async (message) => {
       .trim();
 
     const { text, duration: parsedDuration, count, urlFromText } = parseFlags(raw);
-    const duration = parsedDuration === 2 ? 8 : parsedDuration;
+    const duration = clampDuration(parsedDuration, 30, WALL_DEFAULT_DURATION);
 
     let mediaUrl = null;
     const attachment = message.attachments.first();
@@ -289,9 +346,10 @@ client.on("messageCreate", async (message) => {
       mediaUrl = attachment.url;
     } else if (urlFromText) {
       mediaUrl = urlFromText;
-      if (TENOR_URL.test(mediaUrl) || GIPHY_PAGE.test(mediaUrl)) {
+      // Les particules sont des <img> : on veut une image, pas une vidéo.
+      if (!IMAGE_EXT.test(mediaUrl)) {
         const resolved = await resolveMediaUrl(mediaUrl);
-        if (resolved) mediaUrl = resolved.url;
+        if (resolved?.image) mediaUrl = resolved.image;
       }
     }
 
@@ -327,18 +385,19 @@ client.on("messageCreate", async (message) => {
 
   if (!mention && !isEveryone) {
     return message.reply(
-      "Usage : `!send @user [texte] [url] [--time 1-10] [--pos tl/t/tr/l/c/r/bl/b/br] [--sound] [--start secondes]`\n" +
-      "Pièce jointe OU lien direct (image, gif, vidéo)."
+      "Usage : `!send @user [texte] [url] [--time 1-10] [--pos tl/t/tr/l/c/r/bl/b/br] [--silent] [--start secondes]`\n" +
+      "Pièce jointe OU lien (image, gif, vidéo, YouTube, Tenor, Giphy, Klipy…). Les options peuvent être placées n'importe où."
     );
   }
 
   const raw = message.content
-    .slice(6)
+    .slice(5)
     .replace(/<@!?[0-9]+>/g, "")
     .replace(/@everyone|@here/gi, "")
     .trim();
 
-  const { text, duration, position, sound, start, audioOnly, urlFromText } = parseFlags(raw);
+  const { text, duration: parsedDuration, position, sound, start, audioOnly, urlFromText } = parseFlags(raw);
+  const duration = clampDuration(parsedDuration, 10, SEND_DEFAULT_DURATION);
 
   let mediaUrl = null;
   let mediaType = "image";
@@ -351,17 +410,17 @@ client.on("messageCreate", async (message) => {
     mediaUrl = urlFromText;
     if (YOUTUBE_URL.test(mediaUrl)) mediaType = "youtube";
     else if (VIDEO_EXT.test(mediaUrl)) mediaType = "video";
-    else mediaType = "image";
+    else if (IMAGE_EXT.test(mediaUrl)) mediaType = "image";
+    else {
+      // Lien de page (Klipy, Tenor, Giphy…) ou lien direct sans extension.
+      const resolved = await resolveMediaUrl(mediaUrl);
+      if (!resolved) return message.reply("❌ Impossible de trouver une image ou une vidéo derrière ce lien.");
+      if (resolved.video) { mediaUrl = resolved.video; mediaType = "video"; }
+      else { mediaUrl = resolved.image; mediaType = "image"; }
+    }
   }
 
   if (!mediaUrl) return message.reply("Ajoute une image/vidéo en pièce jointe ou colle un lien dans le message !");
-
-  if (TENOR_URL.test(mediaUrl) || GIPHY_PAGE.test(mediaUrl)) {
-    const resolved = await resolveMediaUrl(mediaUrl);
-    if (resolved) { mediaUrl = resolved.url; mediaType = resolved.type; }
-  } else if (GIPHY_MEDIA.test(mediaUrl)) {
-    mediaType = "image";
-  }
 
   if (audioOnly && mediaType === "video") mediaType = "audio";
 
