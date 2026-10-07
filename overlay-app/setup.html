@@ -4,154 +4,212 @@
   <meta charset="UTF-8" />
   <title>MemeOverlay — Paramètres</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: system-ui, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 18px 22px 18px;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 20px;
       height: 100vh;
       overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #334155 #0f172a;
     }
     h2 {
-      font-size: 0.7rem;
-      color: #555;
+      font-size: 0.75rem;
+      color: #94a3b8;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-top: 6px;
-    }
-    label.field { font-size: 0.75rem; color: #888; }
-    input[type="text"], select {
-      width: 100%;
-      padding: 9px 12px;
-      border-radius: 8px;
-      border: 1px solid #333;
-      background: #0f0f1a;
-      color: #fff;
-      font-size: 0.88rem;
-      outline: none;
-    }
-    input[type="text"]:focus, select:focus { border-color: #a78bfa; }
-    select option { background: #1a1a2e; }
-    hr { border: none; border-top: 1px solid #222; margin: 2px 0; }
-    .row {
+      letter-spacing: 0.05em;
+      margin: 20px 0 10px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      gap: 8px;
     }
-    .row label { font-size: 0.85rem; color: #ccc; flex: 1; }
-    input[type="range"] { flex: 1; accent-color: #a78bfa; cursor: pointer; }
-    #vol-val { font-size: 0.8rem; color: #a78bfa; min-width: 36px; text-align: right; }
-    .toggle {
-      position: relative;
-      width: 38px;
-      height: 21px;
-      flex-shrink: 0;
+    h2:first-child { margin-top: 0; }
+    h2::after { content: ""; flex: 1; height: 1px; background: #1e293b; }
+
+    .card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid #334155;
     }
+
+    label.field { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 4px; font-weight: 600; }
+    input[type="text"], select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus, select:focus { border-color: #8b5cf6; }
+
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .row:last-child { margin-bottom: 0; }
+    .row label { font-size: 0.85rem; color: #cbd5e1; }
+
+    input[type="range"] { flex: 1; accent-color: #8b5cf6; cursor: pointer; }
+    #vol-val { font-size: 0.8rem; color: #a78bfa; min-width: 38px; text-align: right; font-weight: 700; }
+
+    .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
     .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: #333;
-      border-radius: 21px;
-      cursor: pointer;
-      transition: background 0.2s;
+      position: absolute; inset: 0; background: #334155; border-radius: 22px; cursor: pointer; transition: 0.2s;
     }
-    .toggle input:checked + .toggle-track { background: #a78bfa; }
+    .toggle input:checked + .toggle-track { background: #8b5cf6; }
     .toggle-track::after {
-      content: "";
-      position: absolute;
-      width: 15px;
-      height: 15px;
-      left: 3px;
-      top: 3px;
-      background: #fff;
-      border-radius: 50%;
-      transition: transform 0.2s;
+      content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: 0.2s;
     }
-    .toggle input:checked + .toggle-track::after { transform: translateX(17px); }
-    button {
-      width: 100%;
-      margin-top: 6px;
-      padding: 10px;
+    .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
+
+    .list-container {
+      background: #0f172a;
+      border: 1px solid #334155;
       border-radius: 8px;
-      border: none;
-      background: #a78bfa;
-      color: #fff;
-      font-size: 0.95rem;
-      font-weight: 700;
-      cursor: pointer;
+      min-height: 100px;
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 8px;
+      margin-top: 8px;
     }
-    button:hover { background: #9061f9; }
-    .hint { font-size: 0.68rem; color: #444; }
+    .list-item {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #1e293b; padding: 6px 10px; border-radius: 6px; margin-bottom: 4px;
+      font-size: 0.8rem; border: 1px solid #334155;
+    }
+    .list-item span { color: #94a3b8; font-family: monospace; }
+    .list-item button {
+      background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.1rem; padding: 0 4px;
+    }
+
+    .btn-add {
+      background: #334155; color: #f8fafc; border: none; padding: 8px 12px;
+      border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; margin-top: 8px;
+    }
+    .btn-add:hover { background: #475569; }
+
+    .btn-save {
+      position: sticky; bottom: 0; width: 100%; padding: 12px; border-radius: 10px;
+      border: none; background: #8b5cf6; color: #fff; font-size: 1rem; font-weight: 700;
+      cursor: pointer; margin-top: 20px; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+    .btn-save:hover { background: #7c3aed; transform: translateY(-1px); }
+
+    .hint { font-size: 0.7rem; color: #64748b; line-height: 1.4; margin-top: 4px; }
   </style>
 </head>
 <body>
-  <h2>Connexion</h2>
-  <label class="field">Discord User ID</label>
-  <input id="userId" type="text" placeholder="ex: 123456789012345678" autofocus />
-  <label class="field">URL du serveur</label>
-  <input id="serverUrl" type="text" placeholder="ex: http://livememe.romaincampanha.ch" />
 
-  <hr>
-  <h2>Affichage</h2>
-  <label class="field">Taille du média</label>
-  <select id="mediaSize">
-    <option value="small">Petit</option>
-    <option value="medium" selected>Moyen (défaut)</option>
-    <option value="large">Grand</option>
-    <option value="original">Taille originale</option>
-  </select>
+  <h2>Connexion & Sécurité</h2>
+  <div class="card">
+    <div style="margin-top:12px">
+      <label class="field">Code de liaison (Token)</label>
+      <input id="linkToken" type="text" placeholder="Génère un code avec !link sur Discord" />
+      <p class="hint">Indispensable pour authentifier ton overlay.</p>
+    </div>
 
-  <hr>
-  <h2>Son</h2>
-  <div class="row">
-    <label>Volume</label>
-    <input id="volume" type="range" min="0" max="100" value="100" />
-    <span id="vol-val">100%</span>
+    <div style="margin-top:12px">
+      <label class="field">URL du serveur</label>
+      <input id="serverUrl" type="text" placeholder="ex: http://livememe.romaincampanha.ch" />
+    </div>
   </div>
 
-  <hr>
-  <h2>Raccourci — fermer le meme</h2>
-  <input id="closeShortcut" type="text" placeholder="ex: Escape · F5 · CmdOrCtrl+Shift+X" />
-  <p class="hint">Appuie sur la touche voulue dans le champ ci-dessus</p>
+  <h2>Filtrage d'expéditeurs</h2>
+  <div class="card">
+    <div class="row">
+      <label>Mode de filtrage</label>
+      <select id="listMode" style="width:auto">
+        <option value="blacklist">Blacklist (bloquer)</option>
+        <option value="whitelist">Whitelist (autoriser)</option>
+      </select>
+    </div>
+    <p class="hint" id="modeHint">Tu reçois les mèmes de tout le monde, sauf de ces IDs :</p>
 
-  <hr>
+    <div class="list-container" id="idList"></div>
+
+    <div style="display:flex; gap:8px; margin-top:8px">
+      <input id="newId" type="text" placeholder="Discord ID à ajouter..." style="flex:1" />
+      <button class="btn-add" onclick="addId()">Ajouter</button>
+    </div>
+  </div>
+
+  <h2>Audio & Préférences</h2>
+  <div class="card">
+    <div class="row">
+      <label>Volume général</label>
+      <input id="volume" type="range" min="0" max="100" value="100" />
+      <span id="vol-val">100%</span>
+    </div>
+    <div class="row">
+      <label>Son de notification</label>
+      <select id="alertSound" style="width:auto">
+        <option value="default">Bip classique</option>
+        <option value="pop">Pop discret</option>
+        <option value="retro">Rétro</option>
+        <option value="none">Aucun</option>
+      </select>
+    </div>
+  </div>
+
+  <h2>Interface & Raccourcis</h2>
+  <div class="card">
+    <label class="field">Taille par défaut</label>
+    <select id="mediaSize">
+      <option value="small">Petit</option>
+      <option value="medium" selected>Moyen</option>
+      <option value="large">Grand</option>
+      <option value="original">Taille originale</option>
+    </select>
+
+    <div style="margin-top:12px">
+      <label class="field">Raccourci pour fermer</label>
+      <input id="closeShortcut" type="text" placeholder="Appuie sur une touche..." readonly />
+    </div>
+  </div>
+
   <h2>Système</h2>
-  <div class="row">
-    <label>Lancer au démarrage du PC</label>
-    <label class="toggle"><input id="autoLaunch" type="checkbox" /><span class="toggle-track"></span></label>
-  </div>
-  <div class="row" id="row-apps">
-    <label>Ajouter au menu des applications <span style="color:#555;font-size:0.75rem">(Linux)</span></label>
-    <label class="toggle"><input id="addToApps" type="checkbox" /><span class="toggle-track"></span></label>
+  <div class="card">
+    <div class="row">
+      <label>Lancer au démarrage</label>
+      <label class="toggle"><input id="autoLaunch" type="checkbox" /><span class="toggle-track"></span></label>
+    </div>
+    <div class="row" id="row-apps">
+      <label>Ajouter au menu d'applications (Linux)</label>
+      <label class="toggle"><input id="addToApps" type="checkbox" /><span class="toggle-track"></span></label>
+    </div>
   </div>
 
-  <button onclick="save()">Confirmer</button>
-  <p class="hint" style="text-align:center">Discord → Paramètres → Apparence → Mode développeur → clic droit sur ton avatar → Copier l'identifiant</p>
+  <button class="btn-save" onclick="save()">Enregistrer les modifications</button>
 
   <script>
-    // Masquer l'option Linux sur Windows
-    if (navigator.platform.startsWith("Win")) {
-      document.getElementById("row-apps").style.display = "none";
-    }
+    if (navigator.platform.startsWith("Win")) document.getElementById("row-apps").style.display = "none";
 
-    // Volume live
     const volInput = document.getElementById("volume");
-    const volVal   = document.getElementById("vol-val");
+    const volVal = document.getElementById("vol-val");
     volInput.addEventListener("input", () => { volVal.textContent = volInput.value + "%"; });
 
-    // Capture du raccourci clavier
+    const listMode = document.getElementById("listMode");
+    const modeHint = document.getElementById("modeHint");
+    listMode.addEventListener("change", () => {
+      modeHint.textContent = listMode.value === "whitelist"
+        ? "Tu reçois UNIQUEMENT les mèmes de ces IDs :"
+        : "Tu reçois les mèmes de tout le monde, sauf de ces IDs :";
+    });
+
     const shortcutInput = document.getElementById("closeShortcut");
     shortcutInput.addEventListener("keydown", (e) => {
       e.preventDefault();
       const parts = [];
-      if (e.ctrlKey  || e.metaKey) parts.push("CmdOrCtrl");
-      if (e.altKey)   parts.push("Alt");
+      if (e.ctrlKey || e.metaKey) parts.push("CmdOrCtrl");
+      if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
       const key = e.key;
       if (!["Control","Meta","Alt","Shift"].includes(key)) {
@@ -160,31 +218,95 @@
       if (parts.length) shortcutInput.value = parts.join("+");
     });
 
-    // Pré-remplir avec la config existante
-    window.electron.getConfig().then((config) => {
-      if (config.discordUserId)   document.getElementById("userId").value = config.discordUserId;
-      if (config.serverUrl)       document.getElementById("serverUrl").value = config.serverUrl;
-      if (config.mediaSize)       document.getElementById("mediaSize").value = config.mediaSize;
-      if (config.volume != null)  { volInput.value = Math.round(config.volume * 100); volVal.textContent = volInput.value + "%"; }
-      if (config.closeShortcut)   shortcutInput.value = config.closeShortcut;
-      if (config.autoLaunch)      document.getElementById("autoLaunch").checked = config.autoLaunch;
-      if (config.addToApps)       document.getElementById("addToApps").checked = config.addToApps;
-    });
+    let currentIds = [];
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && document.activeElement !== shortcutInput) save();
-    });
+    function renderList() {
+      const container = document.getElementById("idList");
+      container.innerHTML = currentIds.length ? "" : '<p style="color:#475569;font-size:0.8rem;text-align:center;margin-top:30px">Aucun ID filtré.</p>';
+      currentIds.forEach((id, idx) => {
+        const div = document.createElement("div");
+        div.className = "list-item";
+        div.innerHTML = `<span>${id}</span><button onclick="removeId(${idx})">×</button>`;
+        container.appendChild(div);
+      });
+    }
+
+    function addId() {
+      const input = document.getElementById("newId");
+      const id = input.value.trim();
+      if (/^\d{17,20}$/.test(id) && !currentIds.includes(id)) {
+        currentIds.push(id);
+        renderList();
+        input.value = "";
+      }
+    }
+
+    function removeId(idx) {
+      currentIds.splice(idx, 1);
+      renderList();
+    }
+
+    async function load() {
+      const config = await window.electron.getConfig();
+      document.getElementById("linkToken").value = config.linkToken || "";
+      document.getElementById("serverUrl").value = config.serverUrl || "";
+      document.getElementById("mediaSize").value = config.mediaSize || "medium";
+      document.getElementById("alertSound").value = config.alertSound || "default";
+      if (config.volume != null) {
+        volInput.value = Math.round(config.volume * 100);
+        volVal.textContent = volInput.value + "%";
+      }
+      shortcutInput.value = config.closeShortcut || "Escape";
+      document.getElementById("autoLaunch").checked = !!config.autoLaunch;
+      document.getElementById("addToApps").checked = !!config.addToApps;
+
+      try {
+        const res = await fetch(`${config.serverUrl}/api/me/lists`, {
+          headers: { 'Authorization': `Bearer ${config.linkToken}` }
+        });
+        const data = await res.json();
+        currentIds = data.ids || [];
+        listMode.value = data.mode || "blacklist";
+      } catch (e) {
+        console.error("Impossible de charger les listes", e);
+        currentIds = [];
+      }
+      listMode.dispatchEvent(new Event("change"));
+      renderList();
+    }
+
+    load();
 
     function save() {
-      const userId        = document.getElementById("userId").value.trim();
-      const serverUrl     = document.getElementById("serverUrl").value.trim().replace(/\/$/, "");
-      const mediaSize     = document.getElementById("mediaSize").value;
-      const volume        = parseInt(volInput.value) / 100;
-      const closeShortcut = shortcutInput.value.trim() || "Escape";
-      const autoLaunch    = document.getElementById("autoLaunch").checked;
-      const addToApps     = document.getElementById("addToApps").checked;
-      if (!userId || !serverUrl) return;
-      window.electron.saveConfig({ discordUserId: userId, serverUrl, mediaSize, volume, closeShortcut, autoLaunch, addToApps });
+      const config = {
+        linkToken: document.getElementById("linkToken").value.trim(),
+        serverUrl: document.getElementById("serverUrl").value.trim().replace(/\/$/, ""),
+        mediaSize: document.getElementById("mediaSize").value,
+        alertSound: document.getElementById("alertSound").value,
+        volume: parseInt(volInput.value) / 100,
+        closeShortcut: shortcutInput.value.trim() || "Escape",
+        autoLaunch: document.getElementById("autoLaunch").checked,
+        addToApps: document.getElementById("addToApps").checked,
+      };
+
+      if (!config.linkToken || !config.serverUrl) {
+        alert("Code de liaison et URL du serveur sont obligatoires.");
+        return;
+      }
+
+      fetch(`${config.serverUrl}/api/me/lists`, {
+        method: "PUT",
+        headers: {
+          'Authorization': `Bearer ${config.linkToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ mode: listMode.value, ids: currentIds })
+      }).then(r => {
+        if (!r.ok) throw new Error();
+        window.electron.saveConfig(config);
+      }).catch(() => {
+        alert("Impossible de sauvegarder sur le serveur. Vérifie ton token et l'URL.");
+      });
     }
   </script>
 </body>

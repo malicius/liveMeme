@@ -11,6 +11,7 @@ const configPath = path.join(app.getPath("userData"), "config.json");
 let overlayWin = null;
 let tray = null;
 let isPaused = false;
+let isConnected = false;
 let currentShortcut = null;
 let saveConfigListenerActive = false;
 
@@ -20,6 +21,9 @@ const DEFAULT_CONFIG = {
   volume: 1.0,
   autoLaunch: false,
   addToApps: false,
+  linkToken: "",
+  discordUserId: "",
+  serverUrl: "",
 };
 
 function loadConfig() {
@@ -28,15 +32,14 @@ function loadConfig() {
 }
 
 function saveConfigToFile(data) {
-  const merged = { ...DEFAULT_CONFIG, ...data };
-  fs.writeFileSync(configPath, JSON.stringify(merged));
+  const merged = { ...loadConfig(), ...data };
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
   return merged;
 }
 
 function applyAutoLaunch(enable, addToApps) {
   if (process.platform === "linux") {
     const exePath = process.env.APPIMAGE || process.execPath;
-
     const desktopContent = [
       "[Desktop Entry]",
       "Type=Application",
@@ -83,39 +86,61 @@ function registerCloseShortcut(key) {
   } catch {}
 }
 
-function makeTrayIcon(active) {
+function makeTrayIcon(status) {
   const size = 32;
   const buf = Buffer.alloc(size * size * 4);
   const cx = size / 2, cy = size / 2, r = size / 2 - 2;
+
+  // Couleurs : actif (violet), pause (orange), déconnecté (gris)
+  let color = [140, 140, 140, 255]; // déconnecté
+  if (status === "active") color = [167, 139, 250, 255];
+  if (status === "paused") color = [251, 191, 36, 255];
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4;
       if ((x - cx) ** 2 + (y - cy) ** 2 <= r ** 2) {
-        if (active) { buf[i]=250; buf[i+1]=139; buf[i+2]=167; buf[i+3]=255; }
-        else        { buf[i]=140; buf[i+1]=140; buf[i+2]=140; buf[i+3]=255; }
+        buf[i] = color[0]; buf[i+1] = color[1]; buf[i+2] = color[2]; buf[i+3] = color[3];
       }
     }
   }
   return nativeImage.createFromBitmap(buf, { width: size, height: size });
 }
 
+let trayHistory = [];
+
 function updateTrayMenu() {
+  let statusLabel = "🔴  Déconnecté";
+  if (isConnected) statusLabel = isPaused ? "⏸  En pause" : "✅  Actif";
+
   const items = [
-    { label: isPaused ? "⏸  En pause" : "✅  Actif", enabled: false },
+    { label: statusLabel, enabled: false },
     { type: "separator" },
     {
       label: isPaused ? "Reprendre" : "Mettre en pause",
+      enabled: isConnected,
       click: () => {
         isPaused = !isPaused;
-        tray.setImage(makeTrayIcon(!isPaused));
-        tray.setToolTip(isPaused ? "MemeOverlay — En pause" : "MemeOverlay — Actif");
         overlayWin?.webContents.send("set-pause", isPaused);
-        updateTrayMenu();
+        refreshTray();
       }
     },
+    { label: "Vider la file d'attente", enabled: isConnected, click: () => overlayWin?.webContents.send("clear-queue") },
     { label: "Paramètres…", click: () => showSetup() },
     { type: "separator" },
   ];
+
+  if (trayHistory.length) {
+    items.push({ label: "Historique", enabled: false });
+    for (const it of trayHistory.slice(0, 5)) {
+      const label = `${it.senderName || "?"} — ${it.text || it.mediaType || "mème"}`.slice(0, 64);
+      items.push({
+        label,
+        click: () => overlayWin?.webContents.send("replay-meme", it.id)
+      });
+    }
+    items.push({ type: "separator" });
+  }
 
   if (app.isPackaged) {
     items.push({
@@ -123,7 +148,7 @@ function updateTrayMenu() {
       click: () => {
         try {
           const { autoUpdater } = require("electron-updater");
-          autoUpdater.checkForUpdates();
+          autoUpdater.checkForUpdatesAndNotify();
         } catch {}
       }
     });
@@ -131,24 +156,29 @@ function updateTrayMenu() {
   }
 
   items.push({ label: "Quitter", click: () => app.quit() });
-
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 
-function createTray() {
-  tray = new Tray(makeTrayIcon(true));
-  tray.setToolTip("MemeOverlay — Actif");
+function refreshTray() {
+  if (!tray) return;
+  const status = !isConnected ? "disconnected" : (isPaused ? "paused" : "active");
+  tray.setImage(makeTrayIcon(status));
+  tray.setToolTip(`MemeOverlay — ${status === "active" ? "Actif" : (status === "paused" ? "En pause" : "Déconnecté")}`);
   updateTrayMenu();
+}
+
+function createTray() {
+  tray = new Tray(makeTrayIcon("disconnected"));
+  refreshTray();
 }
 
 function createSetupWindow() {
   const win = new BrowserWindow({
-    width: 420,
-    height: 520,
-    resizable: false,
+    width: 440,
+    height: 600,
+    resizable: true,
     alwaysOnTop: true,
     frame: true,
-    skipTaskbar: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -163,6 +193,8 @@ function createSetupWindow() {
 function createOverlayWindow(serverUrl) {
   const { screen } = require("electron");
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  if (overlayWin && !overlayWin.isDestroyed()) overlayWin.destroy();
 
   overlayWin = new BrowserWindow({
     width, height, x: 0, y: 0,
@@ -185,49 +217,23 @@ function createOverlayWindow(serverUrl) {
   overlayWin.setIgnoreMouseEvents(true, { forward: true });
   overlayWin.setAlwaysOnTop(true, "screen-saver");
 
+  if (!tray) createTray();
+  isConnected = false;
   isPaused = false;
-  if (tray) {
-    tray.setImage(makeTrayIcon(true));
-    tray.setToolTip("MemeOverlay — Actif");
-    updateTrayMenu();
-  } else {
-    createTray();
-  }
-}
-
-function registerSaveConfigOnce(callback) {
-  if (saveConfigListenerActive) ipcMain.removeAllListeners("save-config");
-  saveConfigListenerActive = true;
-  ipcMain.once("save-config", (event, config) => {
-    saveConfigListenerActive = false;
-    callback(config);
-  });
-}
-
-function handleSaveConfig(config) {
-  const saved = saveConfigToFile(config);
-  applyAutoLaunch(saved.autoLaunch, saved.addToApps);
-  registerCloseShortcut(saved.closeShortcut);
-  overlayWin?.webContents.send("update-settings", {
-    volume: saved.volume,
-    mediaSize: saved.mediaSize,
-  });
-  return saved;
+  refreshTray();
 }
 
 function showSetup() {
-  if (overlayWin && !overlayWin.isDestroyed()) {
-    overlayWin.close();
-    overlayWin = null;
-  }
-  if (tray) {
-    tray.setImage(makeTrayIcon(false));
-    tray.setToolTip("MemeOverlay — Déconnecté");
-  }
+  if (overlayWin && !overlayWin.isDestroyed()) overlayWin.destroy();
+  isConnected = false;
+  refreshTray();
 
   const setup = createSetupWindow();
-  registerSaveConfigOnce((config) => {
-    const saved = handleSaveConfig(config);
+
+  ipcMain.once("save-config", (event, config) => {
+    const saved = saveConfigToFile(config);
+    applyAutoLaunch(saved.autoLaunch, saved.addToApps);
+    registerCloseShortcut(saved.closeShortcut);
     setup.close();
     createOverlayWindow(saved.serverUrl);
   });
@@ -257,13 +263,8 @@ app.whenReady().then(() => {
   applyAutoLaunch(config.autoLaunch, config.addToApps);
   registerCloseShortcut(config.closeShortcut);
 
-  if (!config.discordUserId || !config.serverUrl) {
-    const setup = createSetupWindow();
-    registerSaveConfigOnce((newConfig) => {
-      const saved = handleSaveConfig(newConfig);
-      setup.close();
-      createOverlayWindow(saved.serverUrl);
-    });
+  if (!config.linkToken || !config.serverUrl) {
+    showSetup();
   } else {
     createOverlayWindow(config.serverUrl);
   }
@@ -271,14 +272,17 @@ app.whenReady().then(() => {
   if (app.isPackaged) {
     try {
       const { autoUpdater } = require("electron-updater");
-      autoUpdater.logger = null;
       autoUpdater.checkForUpdatesAndNotify();
     } catch {}
   }
 });
 
-ipcMain.handle("get-user-id", () => loadConfig().discordUserId || null);
-ipcMain.handle("get-config",  () => loadConfig());
+ipcMain.handle("get-config", () => loadConfig());
+ipcMain.on("set-socket-status", (event, { connected, paused }) => {
+  isConnected = connected;
+  isPaused = paused;
+  refreshTray();
+});
 
-app.on("window-all-closed", () => { /* géré par le tray */ });
+app.on("window-all-closed", () => {});
 app.on("will-quit", () => globalShortcut.unregisterAll());

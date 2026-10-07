@@ -72,7 +72,6 @@ function parseFlags(content) {
     return "";
   });
 
-  // Extraire une URL si présente dans le message
   text = text.replace(/https?:\/\/\S+/gi, (url) => {
     if (!urlFromText) urlFromText = url;
     return "";
@@ -81,12 +80,34 @@ function parseFlags(content) {
   return { text: text.trim(), duration, position, sound, start, audioOnly, urlFromText, count };
 }
 
+function serverFetch(url, options = {}) {
+  const headers = { ...options.headers, "X-API-Key": process.env.API_KEY };
+  return fetch(`${process.env.SERVER_URL}${url}`, { ...options, headers });
+}
+
+async function postMeme(targetUserId, payload) {
+  const res = await serverFetch("/api/send-meme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId, ...payload }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+function describeFailure(data, username) {
+  if (data.status === "paused") return `⏸ ${username} a mis l'overlay en pause.`;
+  if (data.status === "blocked") return `🚫 ${username} ne reçoit pas tes mèmes.`;
+  if (data.status === "wall-busy") return `⏳ Un emote wall est déjà en cours chez ${username}.`;
+  return `❌ ${username} n'est pas connecté(e) à l'overlay.`;
+}
+
 client.once("ready", () => {
   console.log(`Bot connecté : ${client.user.tag}`);
 });
 
 const HELP_MESSAGE = `
-**📖 Commandes MemeScreen**
+**Commandes MemeScreen**
 
 \`\`\`
 !send @user [url ou pièce jointe] [texte] [options]
@@ -94,6 +115,12 @@ const HELP_MESSAGE = `
 !wall @user [emoji ou image] [options]
 !wall @everyone [emoji ou image] [options]
 !who
+!link
+!history
+!block @user
+!allow @user
+!list
+!listmode blacklist|whitelist
 \`\`\`
 
 **Sources supportées :** pièce jointe · image/gif/vidéo · YouTube · Tenor · Giphy
@@ -118,44 +145,128 @@ tl  │  t  │  tr
 bl  │  b  │  br
 \`\`\`
 
-**Exemples :**
-\`!who\`
-\`!send @Jean\` + image en pièce jointe
-\`!send @Jean https://youtu.be/xyz --start 43 --time 10 --sound\`
-\`!wall @Jean 🔥\` — pluie de 🔥 pendant 8s
-\`!wall @everyone 💀 --count 80 --time 12\`
-\`!wall @Jean\` + gif en pièce jointe — pluie d'images
+**Filtre d'expéditeurs** (réglable aussi dans l'overlay) :
+\`!listmode blacklist\` — tout le monde sauf les bloqués
+\`!listmode whitelist\` — seulement les autorisés
 `.trim();
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.channelId !== process.env.MEME_CHANNEL_ID) return;
 
-  if (message.content.trim() === "!help") {
-    return message.reply(HELP_MESSAGE);
+  const content = message.content.trim();
+
+  if (content === "!help") return message.reply(HELP_MESSAGE);
+
+  if (content === "!link") {
+    try {
+      const res = await serverFetch("/api/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: message.author.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) return message.reply("❌ Impossible de générer le code.");
+      await message.author.send(
+        `Colle ce code dans **MemeOverlay → Paramètres → Code de liaison** :\n\`\`\`\n${data.token}\n\`\`\`\nIl est valable 30 jours et lié à ton compte.`
+      );
+      return message.reply("🔐 Code envoyé en message privé.");
+    } catch {
+      return message.reply("❌ Je ne peux pas t'envoyer de MP. Ouvre tes messages privés et réessaie.");
+    }
   }
 
-  if (message.content.trim() === "!who") {
+  if (content === "!who") {
     try {
-      const res = await fetch(`${process.env.SERVER_URL}/api/users`);
-      const ids = await res.json();
-      if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
-      const names = await Promise.all(ids.map(async (id) => {
+      const res = await serverFetch("/api/users");
+      const users = await res.json();
+      if (!users.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
+      const names = await Promise.all(users.map(async (u) => {
+        const flags = [u.paused ? "pause" : null, u.wall ? "wall" : null].filter(Boolean).join(", ");
         try {
-          const member = await message.guild.members.fetch(id);
-          return `• ${member.displayName}`;
+          const member = await message.guild.members.fetch(u.id);
+          return `• ${member.displayName}${flags ? ` _( ${flags} )_` : ""}`;
         } catch {
-          return `• Inconnu (\`${id}\`)`;
+          return `• Inconnu (\`${u.id}\`)${flags ? ` _( ${flags} )_` : ""}`;
         }
       }));
-      return message.reply(`**🟢 Connectés (${ids.length}) :**\n${names.join("\n")}`);
+      return message.reply(`**Connectés (${users.length}) :**\n${names.join("\n")}`);
     } catch {
       return message.reply("❌ Impossible de joindre le serveur.");
     }
   }
 
-  // ── !wall ────────────────────────────────────────────────────────────────
-  if (message.content.startsWith("!wall")) {
+  if (content === "!history") {
+    try {
+      const res = await serverFetch(`/api/history?userId=${message.author.id}`);
+      const items = await res.json();
+      if (!items.length) return message.reply("Aucun mème reçu pour l'instant.");
+      const lines = items.slice(0, 10).map((it, i) => {
+        const when = new Date(it.ts).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+        return `**${i + 1}.** ${it.senderName || "?"} — ${it.text || it.mediaType} _(${when})_`;
+      });
+      return message.reply(`**Tes 10 derniers mèmes :**\n${lines.join("\n")}\n\nRejoue-les depuis le menu de l'overlay.`);
+    } catch {
+      return message.reply("❌ Impossible de joindre le serveur.");
+    }
+  }
+
+  if (content === "!list") {
+    try {
+      const res = await serverFetch(`/api/lists?userId=${message.author.id}`);
+      const list = await res.json();
+      const names = await Promise.all((list.ids || []).map(async (id) => {
+        try {
+          const member = await message.guild.members.fetch(id);
+          return `• ${member.displayName}`;
+        } catch { return `• \`${id}\``; }
+      }));
+      const mode = list.mode === "whitelist" ? "whitelist (seulement eux)" : "blacklist (tout le monde sauf eux)";
+      return message.reply(`**Mode : ${mode}**\n${names.length ? names.join("\n") : "_Liste vide._"}`);
+    } catch {
+      return message.reply("❌ Impossible de joindre le serveur.");
+    }
+  }
+
+  const modeMatch = content.match(/^!listmode\s+(blacklist|whitelist)$/i);
+  if (modeMatch) {
+    try {
+      const current = await serverFetch(`/api/lists?userId=${message.author.id}`).then(r => r.json());
+      await serverFetch("/api/lists", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: message.author.id, mode: modeMatch[1].toLowerCase(), ids: current.ids || [] }),
+      });
+      return message.reply(`Mode réglé sur **${modeMatch[1].toLowerCase()}**.`);
+    } catch {
+      return message.reply("❌ Impossible de joindre le serveur.");
+    }
+  }
+
+  const listEdit = content.match(/^!(block|allow|unblock|unallow)\s+/i);
+  if (listEdit) {
+    const target = message.mentions.users.first();
+    if (!target) return message.reply("Mentionne quelqu'un : `!block @user`");
+    if (target.id === message.author.id) return message.reply("Tu ne peux pas te filtrer toi-même.");
+    const action = listEdit[1].toLowerCase();
+    try {
+      const current = await serverFetch(`/api/lists?userId=${message.author.id}`).then(r => r.json());
+      const ids = new Set(current.ids || []);
+      const add = action === "block" || action === "allow";
+      if (add) ids.add(target.id); else ids.delete(target.id);
+      await serverFetch("/api/lists", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: message.author.id, mode: current.mode || "blacklist", ids: [...ids] }),
+      });
+      const verb = add ? "ajouté à" : "retiré de";
+      return message.reply(`**${target.username}** ${verb} ta liste.`);
+    } catch {
+      return message.reply("❌ Impossible de joindre le serveur.");
+    }
+  }
+
+  if (content.startsWith("!wall")) {
     const isEveryone = message.mentions.everyone;
     const mention    = isEveryone ? null : message.mentions.users.first();
 
@@ -184,44 +295,32 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (!mediaUrl && !text) {
-      return message.reply("Ajoute un emoji, une image ou un lien !");
-    }
+    if (!mediaUrl && !text) return message.reply("Ajoute un emoji, une image ou un lien !");
 
     const senderName = message.member?.displayName || message.author.username;
-    const payload    = { mediaUrl, mediaType: "emote-wall", text, senderName, duration, count };
+    const payload = { mediaUrl, mediaType: "emote-wall", text, senderName, senderId: message.author.id, duration, count };
 
     if (isEveryone) {
       try {
-        const ids = await fetch(`${process.env.SERVER_URL}/api/users`).then(r => r.json());
-        if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
-        await Promise.all(ids.map(id =>
-          fetch(`${process.env.SERVER_URL}/api/send-meme`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetUserId: id, ...payload }),
-          })
-        ));
+        const users = await serverFetch("/api/users").then(r => r.json());
+        const targets = users.filter(u => u.id !== message.author.id && !u.paused && !u.wall);
+        if (!targets.length) return message.reply("Aucun overlay disponible (connecté, pas en pause, pas déjà en wall).");
+        const results = await Promise.all(targets.map(u => postMeme(u.id, payload)));
+        const sent = results.filter(r => r.data.status === "sent").length;
         await message.react("✅");
-        await message.reply(`🌊 Emote wall envoyé à **${ids.length}** utilisateur(s).`);
-      } catch { await message.reply("❌ Impossible de joindre le serveur."); }
-      return;
+        return message.reply(`Emote wall envoyé à **${sent}** utilisateur(s).`);
+      } catch { return message.reply("❌ Impossible de joindre le serveur."); }
     }
 
     try {
-      const res  = await fetch(`${process.env.SERVER_URL}/api/send-meme`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: mention.id, ...payload }),
-      });
-      const data = await res.json();
+      const { data } = await postMeme(mention.id, payload);
       if (data.status === "sent") await message.react("✅");
-      else await message.reply(`❌ ${mention.username} n'est pas connecté(e) à l'overlay.`);
+      else await message.reply(describeFailure(data, mention.username));
     } catch { await message.reply("❌ Impossible de joindre le serveur."); }
     return;
   }
 
-  if (!message.content.startsWith("!send")) return;
+  if (!content.startsWith("!send")) return;
 
   const isEveryone = message.mentions.everyone;
   const mention = isEveryone ? null : message.mentions.users.first();
@@ -241,7 +340,6 @@ client.on("messageCreate", async (message) => {
 
   const { text, duration, position, sound, start, audioOnly, urlFromText } = parseFlags(raw);
 
-  // Source média : pièce jointe en priorité, sinon URL dans le texte
   let mediaUrl = null;
   let mediaType = "image";
 
@@ -256,11 +354,8 @@ client.on("messageCreate", async (message) => {
     else mediaType = "image";
   }
 
-  if (!mediaUrl) {
-    return message.reply("Ajoute une image/vidéo en pièce jointe ou colle un lien dans le message !");
-  }
+  if (!mediaUrl) return message.reply("Ajoute une image/vidéo en pièce jointe ou colle un lien dans le message !");
 
-  // Résolution Tenor / Giphy page → URL directe
   if (TENOR_URL.test(mediaUrl) || GIPHY_PAGE.test(mediaUrl)) {
     const resolved = await resolveMediaUrl(mediaUrl);
     if (resolved) { mediaUrl = resolved.url; mediaType = resolved.type; }
@@ -268,57 +363,31 @@ client.on("messageCreate", async (message) => {
     mediaType = "image";
   }
 
-  // Mode audio seul : on garde youtube pour traitement serveur, video → audio
   if (audioOnly && mediaType === "video") mediaType = "audio";
 
   const senderName = message.member?.displayName || message.author.username;
+  const payload = { mediaUrl, mediaType, text, senderName, senderId: message.author.id, duration, position, sound, start, audioOnly };
 
   if (isEveryone) {
     try {
-      const usersRes = await fetch(`${process.env.SERVER_URL}/api/users`);
-      const ids = await usersRes.json();
-      if (!ids.length) return message.reply("Aucun utilisateur connecté à l'overlay.");
-      await Promise.all(ids.map(id =>
-        fetch(`${process.env.SERVER_URL}/api/send-meme`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targetUserId: id, mediaUrl, mediaType, text, senderName, duration, position, sound, start, audioOnly }),
-        })
-      ));
+      const users = await serverFetch("/api/users").then(r => r.json());
+      const targets = users.filter(u => !u.paused);
+      if (!targets.length) return message.reply("Aucun utilisateur connecté (ou tous en pause).");
+      const results = await Promise.all(targets.map(u => postMeme(u.id, payload)));
+      const sent = results.filter(r => r.data.status === "sent").length;
+      const paused = users.filter(u => u.paused).length;
       await message.react("✅");
-      await message.reply(`📡 Envoyé à **${ids.length}** utilisateur(s) connecté(s).`);
+      return message.reply(`Envoyé à **${sent}** utilisateur(s).${paused ? ` ${paused} en pause, ignoré(s).` : ""}`);
     } catch (err) {
       console.error(err);
-      await message.reply("❌ Impossible de joindre le serveur.");
+      return message.reply("❌ Impossible de joindre le serveur.");
     }
-    return;
   }
 
   try {
-    const res = await fetch(`${process.env.SERVER_URL}/api/send-meme`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        targetUserId: mention.id,
-        mediaUrl,
-        mediaType,
-        text,
-        senderName,
-        duration,
-        position,
-        sound,
-        start,
-        audioOnly,
-      }),
-    });
-
-    const data = await res.json();
-
-    if (data.status === "sent") {
-      await message.react("✅");
-    } else {
-      await message.reply(`❌ ${mention.username} n'est pas connecté(e) à l'overlay.`);
-    }
+    const { data } = await postMeme(mention.id, payload);
+    if (data.status === "sent") await message.react("✅");
+    else await message.reply(describeFailure(data, mention.username));
   } catch (err) {
     console.error(err);
     await message.reply("❌ Impossible de joindre le serveur.");
